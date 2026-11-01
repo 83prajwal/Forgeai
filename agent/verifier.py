@@ -8,8 +8,15 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+import os
+from email.utils import parsedate_to_datetime
+
 import requests
 from agent.executor import PROCESS_HANDLES
+
+# Generated Flask apps can take ~10s to boot on Windows (interpreter start plus
+# antivirus scanning), so the default leaves room for a slow machine.
+DEFAULT_VERIFY_TIMEOUT_SECONDS = float(os.getenv("VERIFY_TIMEOUT_SECONDS", "45"))
 
 
 def _read_error_logs(project_dir: Path) -> str:
@@ -43,6 +50,17 @@ def _process_exit_code(project_dir: Path) -> int | None:
     return process.poll() if process is not None else None
 
 
+def _resolve_table(connection: sqlite3.Connection, table: str) -> str:
+    """Return the contract table, or its singular/plural spelling if the app used that instead."""
+    existing = {row[0].lower(): row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    base = table.lower()
+    candidates = [base, base + "s", base + "es", base[:-1] if base.endswith("s") else None,
+                  base[:-2] if base.endswith("es") else None,
+                  base[:-1] + "ies" if base.endswith("y") else None,
+                  base[:-3] + "y" if base.endswith("ies") else None]
+    return next((existing[name] for name in candidates if name and name in existing), table)
+
+
 def _remove_verifier_record(project_dir: Path, endpoint: dict[str, Any] | None, body: dict[str, Any] | None,
                             record_id: Any = None) -> None:
     """Remove the temporary CRUD-check row so verification never pollutes the app."""
@@ -54,6 +72,7 @@ def _remove_verifier_record(project_dir: Path, endpoint: dict[str, Any] | None, 
     for db_path in project_dir.rglob("*.db"):
         try:
             with sqlite3.connect(db_path) as connection:
+                table = _resolve_table(connection, table)
                 columns = {row[1] for row in connection.execute(f'PRAGMA table_info("{table}")')}
                 if record_id is not None and "id" in columns:
                     connection.execute(f'DELETE FROM "{table}" WHERE "id" = ?', (record_id,))
@@ -69,11 +88,13 @@ def _remove_verifier_record(project_dir: Path, endpoint: dict[str, Any] | None, 
 def verify_generated_app(
     project_dir: str | Path,
     routes: list[str] | None = None,
-    timeout_seconds: float = 15.0,
+    timeout_seconds: float | None = None,
     request_timeout_seconds: float = 5.0,
     api_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Boot the app, exercise CRUD contract routes, and check SQLite persistence."""
+    if timeout_seconds is None:
+        timeout_seconds = DEFAULT_VERIFY_TIMEOUT_SECONDS
     project_dir = Path(project_dir)
     endpoints = (api_contract or {}).get("endpoints", [])
     get_endpoints = [endpoint for endpoint in endpoints if endpoint.get("method", "").upper() == "GET"]
@@ -223,6 +244,7 @@ def verify_generated_app(
                 for db_path in project_dir.rglob("*.db"):
                     try:
                         with sqlite3.connect(db_path) as connection:
+                            table = _resolve_table(connection, table)
                             columns = {row[1] for row in connection.execute(f'PRAGMA table_info("{table}")')}
                             if not columns:
                                 continue
@@ -282,6 +304,54 @@ def _route_for_record(path: str, record_id: Any) -> str:
     return re.sub(r"<[^>]+>", value, path)
 
 
+def _is_system_field(name: str) -> bool:
+    name = name.casefold()
+    return name in {"id", "timestamp"} or name.endswith(("_id", "_at")) or name.startswith(("created", "updated"))
+
+
+def _value_matches(expected: Any, actual: Any) -> bool:
+    """Compare an updated value with what the API returned, tolerating SQLite/JSON encodings."""
+    if isinstance(expected, bool):
+        return actual in (expected, int(expected), str(expected).lower(), str(int(expected)))
+    if isinstance(expected, (int, float)) and not isinstance(actual, bool):
+        try:
+            return float(actual) == float(expected)
+        except (TypeError, ValueError):
+            return False
+    if isinstance(expected, (list, dict)):
+        return actual == expected or (isinstance(actual, str) and actual.replace(" ", "") == json.dumps(expected).replace(" ", ""))
+    if actual == expected or (isinstance(actual, str) and str(expected) in actual):
+        return True
+    # Flask serializes date objects as HTTP dates ("Fri, 16 Jan 2026 00:00:00 GMT").
+    if isinstance(expected, str) and isinstance(actual, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", expected):
+        try:
+            return parsedate_to_datetime(actual).date().isoformat() == expected
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def _updated_values_missing(detail_response: requests.Response, update_payload: dict[str, Any],
+                            posted_body: dict[str, Any]) -> list[str]:
+    """Return changed fields the read-back record does not reflect."""
+    changed = {key: value for key, value in update_payload.items() if value != posted_body.get(key)}
+    try:
+        body = detail_response.json()
+    except ValueError:
+        body = None
+    record = body.get("data", body) if isinstance(body, dict) else None
+    if isinstance(record, list) and len(record) == 1:
+        record = record[0]
+    missing = []
+    for key, value in changed.items():
+        if isinstance(record, dict) and key in record:
+            if not _value_matches(value, record[key]):
+                missing.append(key)
+        elif json.dumps(value) not in detail_response.text and str(value) not in detail_response.text:
+            missing.append(key)
+    return missing
+
+
 def _updated_verification_payload(body: dict[str, Any], field_types: dict[str, Any] | None = None) -> dict[str, Any]:
     """Make valid, visibly changed values where the field shape is inferable."""
     updated = dict(body)
@@ -289,6 +359,8 @@ def _updated_verification_payload(body: dict[str, Any], field_types: dict[str, A
     for key, value in body.items():
         name = key.casefold()
         kind = str(field_types.get(key, "")).casefold()
+        if _is_system_field(name):
+            continue  # Owners, foreign keys, and timestamps are not user-editable.
         if isinstance(value, bool):
             updated[key] = not value
         elif isinstance(value, (int, float)):
@@ -320,10 +392,14 @@ def _verify_update_delete(
 ) -> str | None:
     """Exercise the declared update/delete routes for the created verification row."""
     table = post_endpoint.get("db_table")
-    related = [item for item in endpoints if item.get("db_table") == table]
+    # Only single-record routes (/items/<id>) can update, read back, or delete
+    # the verification row; nested routes like /items/<id>/children cannot.
+    related = [item for item in endpoints if item.get("db_table") == table
+               and (str(item.get("path", "")).endswith(">") or "<" not in str(item.get("path", "")))]
     update = next((item for item in related if item.get("method", "").upper() in {"PUT", "PATCH"}
-                   and isinstance(item.get("request_json"), dict)), None)
-    delete = next((item for item in related if item.get("method", "").upper() == "DELETE"), None)
+                   and isinstance(item.get("request_json"), dict) and str(item.get("path", "")).endswith(">")), None)
+    delete = next((item for item in related if item.get("method", "").upper() == "DELETE"
+                   and str(item.get("path", "")).endswith(">")), None)
     if not update and not delete:
         return None  # Backward-compatible contracts may only describe read/create.
     if record_id is None:
@@ -347,7 +423,7 @@ def _verify_update_delete(
         result["endpoints_verified"] += 1
 
         detail = next((item for item in related if item.get("method", "").upper() == "GET"
-                       and "<" in str(item.get("path", ""))), None)
+                       and str(item.get("path", "")).endswith(">")), None)
         if detail:
             detail_route = _route_for_record(detail["path"], record_id)
             try:
@@ -357,11 +433,9 @@ def _verify_update_delete(
             result["responses"].append({"method": "GET", "route": detail_route, "status_code": detail_response.status_code})
             if not detail_response.ok:
                 return f"GET {detail_route} after update returned HTTP {detail_response.status_code}."
-            if update_payload and any(
-                value != posted_body.get(key) and str(value) not in detail_response.text
-                for key, value in update_payload.items()
-            ):
-                return f"GET {detail_route} did not return the updated verification values."
+            missing = _updated_values_missing(detail_response, update_payload, posted_body) if update_payload else []
+            if missing:
+                return f"GET {detail_route} did not return the updated verification values for: {', '.join(missing)}."
             result["workflow_checks"].append({"operation": "read_after_update", "status": "passed", "route": detail_route})
             result["endpoints_verified"] += 1
 
@@ -378,7 +452,7 @@ def _verify_update_delete(
         result["endpoints_verified"] += 1
 
         detail = next((item for item in related if item.get("method", "").upper() == "GET"
-                       and "<" in str(item.get("path", ""))), None)
+                       and str(item.get("path", "")).endswith(">")), None)
         if detail:
             detail_route = _route_for_record(detail["path"], record_id)
             try:

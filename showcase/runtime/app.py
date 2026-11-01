@@ -21,6 +21,11 @@ def init_db():
         for entity in PROFILE["entities"]:
             columns = [f'"{field["name"]}" {"REAL" if field["type"] == "number" else "TEXT"}' for field in entity["fields"]]
             db.execute(f'CREATE TABLE IF NOT EXISTS "{entity["table"]}" (id INTEGER PRIMARY KEY AUTOINCREMENT, {", ".join(columns)}, created_at TEXT DEFAULT CURRENT_TIMESTAMP)')
+            # Fields added by a later modification become new columns on the existing table.
+            existing = {row[1] for row in db.execute(f'PRAGMA table_info("{entity["table"]}")')}
+            for field in entity["fields"]:
+                if field["name"] not in existing:
+                    db.execute(f'ALTER TABLE "{entity["table"]}" ADD COLUMN "{field["name"]}" {"REAL" if field["type"] == "number" else "TEXT"}')
         db.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         if not db.execute("SELECT 1 FROM settings LIMIT 1").fetchone():
             db.executemany("INSERT INTO settings(key,value) VALUES (?,?)", [("display_name", ""), ("email", ""), ("theme", "light")])

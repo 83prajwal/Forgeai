@@ -271,7 +271,18 @@ def extract_codegen_payload(raw_text: str) -> dict[str, str]:
     if not payload["filename"].strip() or not payload["content"].strip():
         raise ValueError("Generated file payload filename and content must not be empty.")
 
-    return {"filename": payload["filename"], "content": payload["content"]}
+    return {"filename": payload["filename"], "content": _undo_double_escaping(payload["content"])}
+
+
+def _undo_double_escaping(content: str) -> str:
+    """Repair content a model JSON-escaped twice, which arrives as one line of literal \\n sequences."""
+    if "\n" in content.strip() or "\\n" not in content:
+        return content
+    try:
+        decoded = json.loads(f'"{content}"')
+    except json.JSONDecodeError:
+        return content
+    return decoded if isinstance(decoded, str) and "\n" in decoded else content
 
 
 def _normalize_model_error(exc: Exception | str) -> str:

@@ -199,8 +199,12 @@ def _token_budget(provider: str, model: str) -> int:
     return max(512, int(os.getenv("GROQ_TOKENS_PER_MINUTE", configured)))
 
 
-def _throttle(provider: str, budget: int, estimate: int) -> float:
-    """Reserve prompt+completion tokens across concurrent app jobs."""
+def _throttle(provider: str, budget: int, estimate: int, max_wait: float | None = None) -> float:
+    """Reserve prompt+completion tokens across concurrent app jobs.
+
+    With max_wait set, a reservation that would wait longer raises
+    LocalBudgetError so the caller can use a fallback provider instead of idling.
+    """
     wait_total = 0.0
     with _call_lock:
         queue = _usage[provider]
@@ -220,6 +224,11 @@ def _throttle(provider: str, budget: int, estimate: int) -> float:
                 queue.append((now, estimate))
                 return wait_total
             delay = max(0.05, 60 - (now - queue[0][0]))
+            if max_wait is not None and wait_total + delay > max_wait:
+                raise LocalBudgetError(
+                    provider, "",
+                    f"{provider.title()} local per-minute token budget is busy (would wait {delay:.0f}s).",
+                )
             time.sleep(delay)
             wait_total += delay
 
@@ -302,13 +311,15 @@ def _log_failure(provider: str, model: str, prompt: str, max_tokens: int, exc: E
 
 
 def _openai_compatible(provider: str, label: str, url: str, prompt: str, model: str, max_tokens: int,
-                       json_mode: bool, *, native_json: bool = True) -> tuple[str, Any]:
+                       json_mode: bool, *, native_json: bool = True,
+                       extra: dict[str, Any] | None = None) -> tuple[str, Any]:
     """Call an OpenAI-compatible chat completions endpoint (Groq, Mistral, NVIDIA)."""
     key_name = PROVIDER_KEY_NAMES[provider]
     key = os.getenv(key_name, "").strip()
     if not key:
         raise ProviderError(provider, model, f"{key_name} is missing or empty.")
-    body: dict[str, Any] = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}
+    body: dict[str, Any] = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens,
+                            **(extra or {})}
     if json_mode and native_json:
         body["response_format"] = {"type": "json_object"}
     response = requests.post(url, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
@@ -344,8 +355,12 @@ def _openai_compatible(provider: str, label: str, url: str, prompt: str, model: 
 
 
 def _groq(prompt: str, model: str, max_tokens: int, json_mode: bool) -> tuple[str, Any]:
+    # gpt-oss models spend hidden reasoning tokens out of max_tokens; low effort
+    # keeps structured answers from being truncated and makes calls faster.
+    extra = ({"reasoning_effort": os.getenv("GROQ_REASONING_EFFORT", "low")}
+             if "gpt-oss" in model.lower() else None)
     return _openai_compatible("groq", "Groq", "https://api.groq.com/openai/v1/chat/completions",
-                              prompt, model, max_tokens, json_mode)
+                              prompt, model, max_tokens, json_mode, extra=extra)
 
 
 def _mistral(prompt: str, model: str, max_tokens: int, json_mode: bool) -> tuple[str, Any]:
@@ -597,9 +612,14 @@ def generate_with_backoff(
             estimate = len(prompt) // 4 + provider_max_tokens
             wait_seconds = 0.0
             if provider == "groq":
+                # With a fallback available, switch providers rather than idle
+                # for most of a minute waiting for Groq's window to clear.
+                max_wait = float(os.getenv("GROQ_MAX_LOCAL_WAIT_SECONDS", "3")) if next_provider else None
                 try:
-                    wait_seconds = _throttle(provider, _token_budget(provider, model), estimate)
+                    wait_seconds = _throttle(provider, _token_budget(provider, model), estimate, max_wait)
                 except LocalBudgetError as exc:
+                    if next_provider and on_model_switch:
+                        on_model_switch(f"Groq is at its per-minute limit; using {next_provider.title()} instead of waiting")
                     # The local guard is not a Groq rejection. If Gemini is
                     # configured, let the established fallback policy handle
                     # this request without spending a Groq call.

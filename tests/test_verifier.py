@@ -211,3 +211,48 @@ def test_verifier_does_not_treat_response_echo_as_sqlite_persistence(tmp_path):
     assert result["status"] == "unknown"
     assert result["records_persisted"] is False
     assert "not found in the generated SQLite database" in result["error"]
+
+
+def test_resolve_table_accepts_singular_or_plural_names():
+    import sqlite3
+    from agent.verifier import _resolve_table
+
+    connection = sqlite3.connect(":memory:")
+    connection.execute("CREATE TABLE workouts (id INTEGER PRIMARY KEY)")
+    connection.execute("CREATE TABLE category (id INTEGER PRIMARY KEY)")
+
+    assert _resolve_table(connection, "workout") == "workouts"
+    assert _resolve_table(connection, "workouts") == "workouts"
+    assert _resolve_table(connection, "categories") == "category"
+    assert _resolve_table(connection, "missing") == "missing"
+
+
+def test_update_check_skips_system_fields_and_reads_json_values():
+    from agent.verifier import _updated_values_missing, _updated_verification_payload
+
+    posted = {"title": "sample", "user_id": 1, "created_at": "sample", "is_favorite": True, "servings": 1}
+    update = _updated_verification_payload(posted, {"created_at": "datetime"})
+    assert update["user_id"] == 1 and update["created_at"] == "sample"
+    assert update["title"] == "sample-updated" and update["is_favorite"] is False and update["servings"] == 2
+
+    class Detail:
+        text = '{"data": {"title": "sample-updated", "user_id": 1, "created_at": "sample", "is_favorite": 0, "servings": 2.0}}'
+
+        def json(self):
+            import json
+            return json.loads(self.text)
+
+    assert _updated_values_missing(Detail(), update, posted) == []
+
+    class Stale(Detail):
+        text = '{"data": {"title": "sample", "user_id": 1, "is_favorite": 1, "servings": 1}}'
+
+    assert set(_updated_values_missing(Stale(), update, posted)) == {"title", "is_favorite", "servings"}
+
+
+def test_update_check_accepts_flask_http_date_format():
+    from agent.verifier import _value_matches
+
+    assert _value_matches("2026-01-16", "Fri, 16 Jan 2026 00:00:00 GMT")
+    assert _value_matches("2026-01-16", "2026-01-16T00:00:00")
+    assert not _value_matches("2026-01-16", "Thu, 15 Jan 2026 00:00:00 GMT")

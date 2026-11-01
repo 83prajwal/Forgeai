@@ -82,7 +82,7 @@ def test_local_groq_budget_skip_uses_configured_gemini_without_groq_request(monk
     groq_calls = []
     monkeypatch.setattr(llm_client, "_token_budget", lambda *_args: 512)
 
-    def throttle(provider, budget, estimate):
+    def throttle(provider, budget, estimate, max_wait=None):
         if estimate > budget:
             raise llm_client.LocalBudgetError(
                 provider, "model", "Estimated request exceeds the local per-minute safety budget."

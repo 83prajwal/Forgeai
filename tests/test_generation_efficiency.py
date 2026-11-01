@@ -346,3 +346,12 @@ def test_verification_repair_iterations_are_capped(monkeypatch, tmp_path):
     assert result["attempts_used"] == backend_app.MAX_AUTO_REPAIR_ITERATIONS == 3
     assert len(repair_calls) == 3
     assert len(verify_calls) == 4
+
+
+def test_local_token_guard_raises_instead_of_waiting_when_fallback_allowed(monkeypatch):
+    llm_client._usage["groq"].clear()
+    llm_client._throttle("groq", 10_000, 9_000)
+    monkeypatch.setattr(llm_client.time, "sleep", lambda *_: pytest.fail("must not idle when a fallback exists"))
+    with pytest.raises(llm_client.LocalBudgetError, match="busy"):
+        llm_client._throttle("groq", 10_000, 9_000, max_wait=3)
+    llm_client._usage["groq"].clear()

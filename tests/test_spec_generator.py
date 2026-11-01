@@ -144,3 +144,73 @@ def test_legacy_spec_generation_rejects_provider_marked_truncation(monkeypatch):
 
     with pytest.raises(RuntimeError, match="truncated"):
         spec_generator.generate_spec("make an app")
+
+
+def test_plan_steps_accept_object_and_numbered_shapes():
+    from agent.spec_generator import _coerce_plan_steps
+
+    assert _coerce_plan_steps(["Build models", "Add UI"]) == ["Build models", "Add UI"]
+    assert _coerce_plan_steps([{"step": 1, "description": "Build models"}, {"title": "Add UI"}]) == ["Build models", "Add UI"]
+    assert _coerce_plan_steps("1. Build models\n2) Add UI") == ["Build models", "Add UI"]
+    with pytest.raises(ValueError, match="list of strings"):
+        _coerce_plan_steps([{"step": 1}, 5])
+
+
+def test_api_contract_converts_express_and_openapi_path_params():
+    from agent.spec_generator import build_api_contract
+
+    spec = {"entities": [{"name": "Workouts", "fields": [{"name": "title", "type": "string"}]}],
+            "routes_needed": ["GET /api/workouts", "GET /api/workouts/:id", "DELETE /api/workouts/{id}"]}
+    paths = {(item["method"], item["path"]) for item in build_api_contract(spec)["endpoints"]}
+
+    assert ("GET", "/api/workouts/<int:id>") in paths
+    assert ("DELETE", "/api/workouts/<int:id>") in paths
+    assert not any(":" in path.replace("<int:", "") or "{" in path for _method, path in paths)
+
+
+def test_api_contract_ignores_new_and_edit_form_pages():
+    from agent.spec_generator import build_api_contract
+
+    spec = {"entities": [{"name": "Workouts", "fields": [{"name": "title", "type": "string"}]}],
+            "routes_needed": ["GET /workouts/new", "GET /workouts/:id/edit", "GET /api/workouts"]}
+    paths = [item["path"] for item in build_api_contract(spec)["endpoints"]]
+
+    assert not any(path.endswith(("/new", "/edit")) for path in paths)
+    assert "/api/workouts" in paths
+
+
+def test_api_contract_keeps_flask_path_params_unchanged():
+    from agent.spec_generator import build_api_contract
+
+    spec = {"entities": [{"name": "Workouts", "fields": [{"name": "title", "type": "string"}]}],
+            "routes_needed": ["GET /api/workouts/<int:id>", "PUT /api/workouts/<id>"]}
+    paths = {item["path"] for item in build_api_contract(spec)["endpoints"]}
+
+    assert "/api/workouts/<int:id>" in paths and "/api/workouts/<id>" in paths
+    assert not any("<int<" in path for path in paths)
+
+
+def test_api_contract_assigns_nested_routes_to_their_child_entity():
+    from agent.spec_generator import build_api_contract
+
+    spec = {"entities": [{"name": "Workout", "fields": [{"name": "title", "type": "string"}]},
+                         {"name": "Exercise", "fields": [{"name": "name", "type": "string"}]}],
+            "routes_needed": ["GET /api/workouts/<int:id>/exercises", "GET /api/workouts", "PUT /api/workouts/<int:id>"]}
+    endpoints = build_api_contract(spec)["endpoints"]
+    by_route = {(item["method"], item["path"]): item["db_table"] for item in endpoints}
+
+    assert by_route[("GET", "/api/workouts/<int:id>/exercises")] == "exercise"
+    assert by_route[("PUT", "/api/workouts/<int:id>")] == "workout"
+    workout_details = {path for (method, path), table in by_route.items() if table == "workout" and "<" in path}
+    assert workout_details == {"/api/workouts/<int:id>"}
+
+
+def test_api_contract_strips_query_strings_from_routes():
+    from agent.spec_generator import build_api_contract
+
+    spec = {"entities": [{"name": "Recipes", "fields": [{"name": "title", "type": "string"}]}],
+            "routes_needed": ["GET /api/recipes/search?query=", "GET /api/recipes?page=1"]}
+    paths = {item["path"] for item in build_api_contract(spec)["endpoints"]}
+
+    assert "/api/recipes/search" in paths and "/api/recipes" in paths
+    assert not any("?" in path for path in paths)

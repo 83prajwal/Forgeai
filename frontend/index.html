@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#101311" />
+    <meta name="description" content="Describe an app. ForgeAI builds, runs, and verifies it." />
+    <title>ForgeAI — Describe it. ForgeAI builds it.</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#prompt">Skip to app description</a>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="ForgeAI home"><span class="brand-mark" aria-hidden="true">F</span><span>Forge<span class="brand-ai">AI</span></span></a>
+      <div class="topbar-right">
+        <a href="/health" class="health-link">System health</a>
+        <label class="demo-toggle" for="demo-mode"><input id="demo-mode" type="checkbox" /> Demo replay</label>
+        <span class="forged-counter" aria-live="polite"><span class="pulse-dot"></span><strong id="apps-forged">0</strong> apps forged</span>
+        <button id="theme-toggle" class="icon-button" type="button" aria-label="Switch to light theme" title="Toggle theme"><span aria-hidden="true">☼</span></button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero shell" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="eyebrow-line"></span> YOUR IDEA, RUNNING LOCALLY</div>
+          <h1 id="hero-title">Describe it.<br /><span>ForgeAI builds it.</span></h1>
+          <p class="hero-subtitle">Turn a plain-English idea into a working app. Watch it take shape, test itself, and open in your browser.</p>
+        </div>
+        <div class="hero-orbit" aria-hidden="true"><span class="orbit-ring ring-one"></span><span class="orbit-ring ring-two"></span><span class="orbit-core">F</span><span class="orbit-point"></span></div>
+
+        <form id="generate-form" class="prompt-card">
+          <label for="prompt">What should your app do?</label>
+          <textarea id="prompt" rows="3" maxlength="1200" placeholder="A simple task tracker where I can add tasks, mark them done, and filter by priority…" required></textarea>
+          <div class="prompt-bottom">
+            <button id="voice-button" class="secondary-button voice-button hidden" type="button" aria-label="Speak your app idea">Speak</button>
+            <span class="prompt-hint"><span class="sparkle" aria-hidden="true">✳</span> Be specific. ForgeAI will handle the code.</span>
+            <button id="generate-btn" class="primary-button" type="submit"><span>Generate app</span><span class="button-arrow" aria-hidden="true">↗</span></button>
+          </div>
+        </form>
+
+        <div class="examples" aria-label="Example app ideas">
+          <span class="examples-label">TRY AN IDEA</span>
+          <div class="chip-row">
+            <button class="example-chip" type="button" data-prompt="A task tracker with task titles, due dates, priority levels, and a way to mark tasks complete."><span aria-hidden="true">✓</span> Task tracker</button>
+            <button class="example-chip" type="button" data-prompt="A fitness tracker to log workouts, exercises, duration, and personal progress over time."><span aria-hidden="true">↗</span> Fitness tracker</button>
+            <button class="example-chip" type="button" data-prompt="A resume builder that saves profile details, work experience, skills, and education in a clean resume view."><span aria-hidden="true">▤</span> Resume builder</button>
+            <button class="example-chip" type="button" data-prompt="A student attendance app to record students, classes, attendance dates, and present or absent status."><span aria-hidden="true">◎</span> Student attendance</button>
+            <button class="example-chip" type="button" data-prompt="An inventory manager to track products, quantities, categories, and low-stock items."><span aria-hidden="true">▦</span> Inventory manager</button>
+            <button class="example-chip" type="button" data-prompt="An expense splitter for a group trip that tracks expenses, who paid, participants, and each person's balance."><span aria-hidden="true">⇄</span> Expense splitter</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="template-gallery shell" aria-labelledby="templates-title">
+        <div class="gallery-heading"><h2 id="templates-title">Start with a template</h2><span>8 ideas across 4 categories</span></div>
+        <div id="template-list" class="template-list"></div>
+      </section>
+      <section class="history-gallery shell" aria-labelledby="history-title">
+        <div class="gallery-heading"><h2 id="history-title">Recently forged</h2><span>Pick up where a build left off</span></div>
+        <div id="history-list" class="history-list" aria-live="polite"><p class="gallery-empty">Your verified builds will appear here.</p></div>
+      </section>
+
+      <section id="build-section" class="build-section shell hidden" aria-labelledby="build-title">
+        <div class="section-heading">
+          <div><div class="eyebrow"><span class="eyebrow-line"></span> LIVE WORKSPACE</div><h2 id="build-title">Your app, taking shape<span class="heading-period">.</span></h2></div>
+          <div class="build-status"><span id="status-indicator" class="status-indicator"></span><span id="status-text" role="status" aria-live="polite">Waiting for your idea</span></div>
+        </div>
+
+        <ol id="pipeline" class="pipeline" aria-label="Build progress">
+          <li data-step="understand"><span class="step-icon">1</span><span>Understand</span></li>
+          <li data-step="design"><span class="step-icon">2</span><span>Design</span></li>
+          <li data-step="code"><span class="step-icon">3</span><span>Code</span></li>
+          <li data-step="run"><span class="step-icon">4</span><span>Run</span></li>
+          <li data-step="verify"><span class="step-icon">5</span><span>Verify</span></li>
+          <li data-step="self-heal"><span class="step-icon">6</span><span>Self-heal</span></li>
+        </ol>
+
+        <div class="workspace-toolbar">
+          <span class="workspace-caption">BUILD WORKSPACE</span>
+          <nav class="pane-links" aria-label="Workspace panes">
+            <a href="#log-pane">Build log</a><a href="#code-pane">Code</a><a href="#preview-pane">Live preview</a>
+            <button id="blueprint-tab" type="button" aria-controls="blueprint-panel" aria-expanded="false">Blueprint <span aria-hidden="true">⌄</span></button>
+          </nav>
+        </div>
+
+        <div id="workspace-grid" class="workspace-grid">
+          <section id="log-pane" class="workspace-pane log-pane" aria-labelledby="log-title">
+            <div class="pane-header"><div><span class="pane-kicker">01 / BUILD</span><h3 id="log-title">Build log</h3></div><span class="live-label"><i></i> LIVE</span></div>
+            <div id="log-output" class="log-output" aria-live="polite" aria-relevant="additions text"><p class="log-empty">Your build steps will appear here.</p></div>
+            <div class="pane-foot"><span class="mono-dot"></span><span id="job-label">No active build</span></div>
+          </section>
+
+          <section id="code-pane" class="workspace-pane code-pane" aria-labelledby="code-title">
+            <div class="pane-header"><div><span class="pane-kicker">02 / SOURCE</span><h3 id="code-title">Generated code</h3></div><span id="file-count" class="pane-count">0 files</span></div>
+            <div id="file-tabs" class="file-tabs" role="tablist" aria-label="Generated files"><span class="file-empty">Files appear as ForgeAI creates them</span></div>
+            <div class="code-toolbar"><span id="active-filename">Select a file</span><button id="copy-code" class="text-button" type="button" disabled>Copy code</button></div>
+            <div class="code-scroll"><pre id="code-output" role="tabpanel" tabindex="0" aria-label="Selected generated source code"><code class="language-plain">// Generated files will appear here</code></pre></div>
+            <div class="pane-foot"><span class="mono-dot"></span><span>Flask <span class="muted-sep">·</span> SQLite <span class="muted-sep">·</span> Vanilla JS</span></div>
+          </section>
+
+          <section id="preview-pane" class="workspace-pane preview-pane" aria-labelledby="preview-title">
+            <div class="pane-header"><div><span class="pane-kicker">03 / RESULT</span><h3 id="preview-title">Live preview</h3></div><div class="width-switch" role="group" aria-label="Preview width"><button type="button" data-width="desktop" aria-pressed="true">Desktop</button><button type="button" data-width="phone" aria-pressed="false">Phone</button></div></div>
+            <div class="browser-frame"><div class="browser-bar"><span class="browser-dots"><i></i><i></i><i></i></span><span id="preview-address" class="browser-address">Your app will open here</span><button id="refresh-preview" class="refresh-button" type="button" aria-label="Refresh preview">↻</button></div><div class="iframe-stage"><div id="iframe-wrap" class="iframe-wrap"><iframe id="preview-frame" title="Generated app live preview" src="about:blank" loading="lazy"></iframe><div id="preview-placeholder" class="preview-placeholder"><span class="placeholder-mark" aria-hidden="true">F</span><strong>Ready when you are.</strong><span>Your working app will appear here.</span></div></div></div></div>
+            <div class="pane-foot"><span id="preview-state" class="preview-state">Waiting for a successful build</span></div>
+          </section>
+        </div>
+
+        <section id="blueprint-panel" class="blueprint-panel hidden" aria-labelledby="blueprint-title">
+          <div class="pane-header"><div><span class="pane-kicker">APP ARCHITECTURE</span><h3 id="blueprint-title" tabindex="-1">The blueprint</h3></div><button id="close-blueprint" class="text-button" type="button">Back to workspace</button></div>
+          <div id="blueprint-content" class="blueprint-content"><div class="blueprint-empty">Your app's data model will be mapped here.</div></div>
+        </section>
+
+        <section id="stats-strip" class="stats-strip hidden" aria-label="Build statistics">
+          <div class="stat-item"><span class="stat-value" id="stat-time">—</span><span class="stat-label">Build time</span></div>
+          <div class="stat-item"><span class="stat-value" id="stat-files">—</span><span class="stat-label">Files created</span></div>
+          <div class="stat-item"><span class="stat-value" id="stat-lines">—</span><span class="stat-label">Lines of code</span></div>
+          <div class="stat-item"><span class="stat-value" id="stat-endpoints">—</span><span class="stat-label">API checks passed</span></div>
+          <div class="stat-item"><span class="stat-value" id="stat-fixes">—</span><span class="stat-label">Auto-fixes</span></div>
+        </section>
+
+        <section id="verification-summary" class="verification-summary hidden" aria-labelledby="verification-title"><h3 id="verification-title">Verification results</h3><ul id="verification-checks" aria-live="polite"></ul></section>
+        <section id="repair-summary" class="repair-summary hidden" aria-labelledby="repair-title"><div class="repair-icon" aria-hidden="true">✳</div><div><h3 id="repair-title">ForgeAI caught and fixed an issue</h3><div id="repair-diff" class="repair-diff"></div></div></section>
+
+        <section id="result-actions" class="result-actions hidden" aria-label="App actions">
+          <p id="live-failure-banner" class="error-banner hidden" role="status"></p>
+          <div class="result-intro"><span class="success-mark" aria-hidden="true">✓</span><div><strong>Your app is ready.</strong><span>It passed its build check and is running locally.</span></div></div>
+          <div class="action-row"><a id="open-preview" class="primary-button" href="#preview-pane">Open preview <span aria-hidden="true">↗</span></a><button id="download-btn" class="secondary-button" type="button">Download .zip <span aria-hidden="true">↓</span></button><button id="copy-share" class="secondary-button" type="button">Copy share link <span aria-hidden="true">⧉</span></button><button id="show-qr" class="secondary-button" type="button">Show QR code <span aria-hidden="true">▦</span></button></div>
+          <div id="qr-panel" class="qr-panel hidden"><div id="qr-code" class="qr-code" aria-label="QR code for your app preview"></div><p>Scan to open this preview on a device on the same Wi-Fi.</p></div>
+        </section>
+
+        <section id="compare-panel" class="compare-panel hidden" aria-labelledby="compare-title">
+          <label><input id="compare-toggle" type="checkbox" checked /> Compare the build time</label>
+          <div id="compare-content"><div><span>Without ForgeAI</span><strong>~2 days</strong></div><span aria-hidden="true">→</span><div><span>With ForgeAI</span><strong id="compare-time">—</strong></div></div>
+        </section>
+        <section id="modify-panel" class="modify-panel hidden" aria-labelledby="modify-title">
+          <div class="pane-header"><div><span class="pane-kicker">KEEP BUILDING</span><h3 id="modify-title">Modify your app</h3></div><span id="version-count" class="pane-count">Version 1</span></div>
+          <p>Describe a focused change. ForgeAI updates only the files that need it and verifies the result.</p>
+          <form id="modify-form"><label class="sr-only" for="modify-input">Describe a change to your app</label><textarea id="modify-input" rows="2" placeholder="Add a dark mode or search box…" required></textarea><button id="modify-submit" class="primary-button" type="submit">Apply change</button></form>
+          <div class="modify-suggestions"><button type="button" data-change="Add a search box to filter the records">Add search</button><button type="button" data-change="Add a priority field to each record">Add priority</button><button type="button" data-change="Add a dark mode toggle to the app">Add dark mode</button></div>
+          <div id="modify-message" role="status" aria-live="polite"></div>
+          <div class="version-controls"><span id="version-history">No earlier versions</span><button id="undo-button" class="secondary-button" type="button" disabled>Undo change</button></div>
+        </section>
+        <section id="error-panel" class="error-panel hidden" aria-labelledby="error-title">
+          <span class="error-mark" aria-hidden="true">!</span><div class="error-copy"><h3 id="error-title">That build hit a snag.</h3><p id="error-message">ForgeAI couldn't finish this app yet.</p><details id="developer-details" class="developer-details"><summary>Developer details</summary><pre id="developer-error"></pre></details></div><button id="offline-replay-btn" class="secondary-button" type="button">Try offline replay</button><button id="retry-btn" class="secondary-button" type="button">Try again <span aria-hidden="true">↻</span></button>
+        </section>
+      </section>
+    </main>
+
+    <footer class="site-footer shell"><span><span class="footer-mark">F</span> ForgeAI</span><span>From plain English to a running app.</span><span>Built for the next big idea.</span></footer>
+    <script src="qr.js"></script>
+    <script src="script.js"></script>
+  </body>
+</html>

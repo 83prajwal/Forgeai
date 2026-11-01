@@ -34,6 +34,8 @@ Requirements:
 - Never define an API route at `/`; the deterministic app entrypoint reserves `/` for the generated application UI. Use `/api/...` paths for API endpoints.
 - Initialize SQLite schema from models.py and use the same database/table names and columns in routes.py.
 - Define one shared SQLite interface in models.py: expose get_db() for the request-scoped connection and init_app(app) to create the schema and register connection cleanup. routes.py must import and use models.get_db(); it must not open a separate SQLite connection, choose another database path, or duplicate schema setup. The deterministic app.py calls models.init_app(app) before registering the API blueprint.
+- In models.py, open SQLite at current_app.config["DATABASE"] (app.py sets it to app.db in the project folder). Do not build another database path.
+- Store and return dates as plain ISO text (YYYY-MM-DD). Do not pass detect_types to sqlite3.connect, so JSON responses never contain Python date objects.
 - Keep every newly created entity table empty on first run. Do not insert seed, sample, demo, fixture, or invented profile records; create data only in response to a user's explicit action.
 - In script.js, use the same endpoint paths and request/response shapes as the API contract.
 - Build the actual app described by the user's request, not a generic records demo. Implement the requested domain features, fields, actions, and useful empty/loading/error states in a cohesive, polished UI. Keep the core workflow immediately usable and make each requested feature visible and functional.

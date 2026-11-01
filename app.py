@@ -21,16 +21,18 @@ import requests
 from agent.llm_client import generate_with_backoff
 from flask import Flask, Response, jsonify, request, send_from_directory
 
+from agent.blueprint import generate_blueprint
 from agent.code_generator import extract_codegen_payload, generate_file_for_component
 from agent.executor import PROCESS_HANDLES, execute_generated_app, restart_generated_app, start_generated_app, stop_generated_app, write_generated_files
 from agent.showcase import contract_for_showcase, load_showcases, match_showcase, materialize_showcase, prepare_showcases
 from agent.spec_generator import build_api_contract, extract_json_payload, generate_spec, generate_spec_and_plan
 from agent.verifier import verify_generated_app
-from agent.llm_client import get_call_metrics, get_call_stats
+from agent.llm_client import PROVIDER_KEY_NAMES, get_call_metrics, get_call_stats
+from agent.llm_client import _provider_order as llm_provider_order
 from config import LLM_PROVIDER, OLLAMA_BASE_URL, OLLAMA_MODEL
 
-# Serve frontend from the parent directory's frontend folder
-FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend"
+# Serve the frontend bundled next to this file
+FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 
 app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
 
@@ -45,6 +47,9 @@ MAX_CONCURRENT_APPS = 8
 MAX_APP_LIFETIME_SECONDS = 30 * 60
 MAX_AUTO_REPAIR_ITERATIONS = 3
 MAX_SYNTAX_REPAIR_ITERATIONS = 2
+# "blueprint" (default): the model designs the app and the tested runtime builds it.
+# "codegen": the legacy path where the model writes every backend/frontend file.
+GENERATION_MODE = os.getenv("GENERATION_MODE", "blueprint").strip().lower()
 MANAGED_PROJECT_DIRS: set[Path] = set()
 BACKEND_DIR = Path(__file__).resolve().parent
 JOBS_DIR = BACKEND_DIR / "jobs"
@@ -202,6 +207,8 @@ def _format_error_message(exc: Exception | str | None) -> str:
         return reason
     if "ollama request timed out" in lowered:
         return message
+    if "waiting for the app to respond" in lowered:
+        return "The generated app stopped responding during verification (it crashed or never started)."
     if any(token in lowered for token in ("timeout", "timed out", "deadlineexceeded", "deadline exceeded")):
         return "Live generation timed out while waiting for the model provider."
     if any(token in lowered for token in ["invalid api key", "api key", "authentication", "401", "403", "forbidden"]):
@@ -312,26 +319,35 @@ def _model_network_reachable() -> bool:
         return False
 
 
-def _run_showcase_job(job_id: str, showcase: dict[str, Any], log: Any) -> None:
-    """Launch a locally stored, domain-specific pre-built showcase app."""
+def _spec_for_blueprint(blueprint: dict[str, Any]) -> dict[str, Any]:
+    entities = [{"name": entity["name"], "fields": [{"name": field["name"], "type": field.get("type", "text")} for field in entity["fields"]]}
+                for entity in blueprint["entities"]]
+    return {"app_name": blueprint["name"], "entities": entities, "relationships": [],
+            "pages_needed": ["Dashboard", *[entity["name"] for entity in blueprint["entities"]], "Settings"],
+            "routes_needed": [f"GET /api/{entity['table']}" for entity in blueprint["entities"]],
+            "theme": {"accent_colour": blueprint["accent"], "icon": blueprint["icon"], "tone": blueprint["tone"]},
+            "api_contract": contract_for_showcase(blueprint)}
+
+
+def _run_showcase_job(job_id: str, showcase: dict[str, Any], log: Any, replay: bool = True) -> None:
+    """Launch a blueprint on the proven runtime: an AI blueprint (replay=False) or a stored showcase."""
     job = JOB_STORE[job_id]
     previous_execution = job.get("execution") or {}
     if previous_execution.get("project_dir"):
         stop_generated_app(Path(previous_execution["project_dir"]))
-    job["replay"] = True
-    showcase_entities = [{"name": entity["name"], "fields": [{"name": field["name"], "type": field.get("type", "string")} for field in entity["fields"]]} for entity in showcase["entities"]]
-    job["spec"] = {"app_name": showcase["name"], "entities": showcase_entities, "relationships": [],
-        "pages_needed": ["Dashboard", *[entity["name"] for entity in showcase["entities"]], "Settings"],
-        "routes_needed": ["GET /", *[f"GET /api/{entity['table']}" for entity in showcase["entities"]]],
-        "api_contract": contract_for_showcase(showcase)}
-    log(f"Prebuilt showcase replay selected: {showcase['name']}. No AI generation or external model calls are used.")
-    job["current_step"] = "3_spec_generation"; time.sleep(0.18)
-    log("Idea matched to a locally stored showcase blueprint")
+    job["replay"] = replay
+    job["spec"] = _spec_for_blueprint(showcase)
+    job["plan"] = [f"Create the {entity['name']} collection" for entity in showcase["entities"]]
+    if replay:
+        log(f"Prebuilt showcase replay selected: {showcase['name']}. No AI generation or external model calls are used.")
+        job["current_step"] = "3_spec_generation"; time.sleep(0.18)
+        log("Idea matched to a locally stored showcase blueprint")
     job["current_step"] = "5_code_generation"
-    project_dir = GENERATED_PROJECTS_DIR / f"replay_{showcase['id']}_{uuid.uuid4().hex[:8]}"
+    prefix = "replay" if replay else "app"
+    project_dir = GENERATED_PROJECTS_DIR / f"{prefix}_{showcase['id']}_{uuid.uuid4().hex[:8]}"
     files = materialize_showcase(showcase, project_dir)
     for file in files:
-        log(f"Loaded verified file: {file['filename']}")
+        log(f"{'Loaded verified' if replay else 'Created'} file: {file['filename']}")
     job["generated_files"] = files
     job["current_step"] = "6_execution"
     with APP_LIFECYCLE_LOCK:
@@ -346,13 +362,13 @@ def _run_showcase_job(job_id: str, showcase: dict[str, Any], log: Any) -> None:
     job["verification"] = {"status": "ok" if verification.get("status") == "ok" else "failed", "verification": verification, "repairs": []}
     if verification.get("status") != "ok":
         reason = verification.get("error") or verification.get("status") or "unknown verifier result"
-        raise RuntimeError(f"Stored showcase failed its live verification: {reason}")
+        raise RuntimeError(f"{'Stored showcase' if replay else 'Generated app'} failed its live verification: {reason}")
     job["status"] = "success"; job["current_step"] = "8_complete"
     job["duration_seconds"] = round(time.time() - job.get("started_at", time.time()), 1)
-    job["result"] = {"success": True, "path": str(project_dir), "port": execution["port"], "verification": job["verification"], "replay": True,
-        "label": f"Prebuilt showcase replay: {showcase['name']}",
+    job["result"] = {"success": True, "path": str(project_dir), "port": execution["port"], "verification": job["verification"], "replay": replay,
+        "label": f"Prebuilt showcase replay: {showcase['name']}" if replay else None,
         "live_generation_failure": job.get("live_generation_failure")}
-    log("Pre-built example passed runtime verification.")
+    log("Pre-built example passed runtime verification." if replay else "Verification passed. App is working.")
     _persist_job(job_id, job)
 
 
@@ -723,6 +739,8 @@ def validate_generated_project_files(
             str(item.get("path")) for item in contract_endpoints
             if item.get("db_table") and "<" not in str(item.get("path", ""))
             and str(item.get("path", "")) not in script
+            # Accept prefixed calls such as `${API}/workouts` as well as the literal path.
+            and "/" + str(item.get("path", "")).rstrip("/").rsplit("/", 1)[-1] not in script
         })
         if missing_client_paths:
             issues.append("script.js does not reference contract API collection path(s): " + ", ".join(missing_client_paths))
@@ -735,7 +753,7 @@ def _deterministic_file(component_name: str) -> str | None:
     if component_name == "requirements.txt":
         return "Flask>=3.1,<4\n"
     if component_name == "app.py":
-        return '''import os\nfrom flask import Flask, jsonify, send_from_directory\nfrom routes import bp\nimport models\n\napp = Flask(__name__)\n\n# Initialize the generated schema before serving any API request. The models\n# and routes modules are required to share this database connection/schema.\nif callable(getattr(models, "init_app", None)):\n    models.init_app(app)\nelif callable(getattr(models, "init_db", None)):\n    with app.app_context():\n        models.init_db()\n\n@app.get("/")\ndef index():\n    return send_from_directory(app.root_path, "index.html")\n\n# Keep the generated UI root ahead of API routes, even if a model emits a duplicate.\napp.register_blueprint(bp)\n\n@app.get("/style.css")\ndef stylesheet():\n    return send_from_directory(app.root_path, "style.css")\n\n@app.get("/script.js")\ndef javascript():\n    return send_from_directory(app.root_path, "script.js")\n\n@app.errorhandler(404)\ndef not_found(_error):\n    return jsonify({"error": "Not found"}), 404\n\nif __name__ == "__main__":\n    port = int(os.environ.get("PORT", 5000))\n    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)\n'''
+        return '''import os\nfrom flask import Flask, jsonify, send_from_directory\nfrom routes import bp\nimport models\n\napp = Flask(__name__)\n# One known SQLite location for models.py; also create Flask\'s instance folder\n# in case generated code stores files there.\napp.config.setdefault("DATABASE", os.path.join(app.root_path, "app.db"))\nos.makedirs(app.instance_path, exist_ok=True)\n\n# Initialize the generated schema before serving any API request. The models\n# and routes modules are required to share this database connection/schema.\nif callable(getattr(models, "init_app", None)):\n    models.init_app(app)\nelif callable(getattr(models, "init_db", None)):\n    with app.app_context():\n        models.init_db()\n\n@app.get("/")\ndef index():\n    return send_from_directory(app.root_path, "index.html")\n\n# Keep the generated UI root ahead of API routes, even if a model emits a duplicate.\napp.register_blueprint(bp)\n\n@app.get("/style.css")\ndef stylesheet():\n    return send_from_directory(app.root_path, "style.css")\n\n@app.get("/script.js")\ndef javascript():\n    return send_from_directory(app.root_path, "script.js")\n\n@app.errorhandler(404)\ndef not_found(_error):\n    return jsonify({"error": "Not found"}), 404\n\nif __name__ == "__main__":\n    port = int(os.environ.get("PORT", 5000))\n    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)\n'''
     return None
 
 
@@ -896,6 +914,15 @@ def run_generation_job(job_id: str, user_prompt: str) -> None:
                 raise RuntimeError("The selected offline showcase is no longer available. Check backend/showcase/catalog.json.")
         if showcase:
             _run_showcase_job(job_id, showcase, log)
+            return
+        if GENERATION_MODE == "blueprint":
+            # Default path: the model designs the app; the tested runtime builds it.
+            job["current_step"] = "3_spec_generation"
+            log("Designing your app blueprint")
+            blueprint = generate_blueprint(user_prompt, on_model_switch=log)
+            entity_summary = ", ".join(f"{entity['name']} ({len(entity['fields'])} fields)" for entity in blueprint["entities"])
+            log(f"Blueprint ready: {blueprint['name']} with {entity_summary}")
+            _run_showcase_job(job_id, blueprint, log, replay=False)
             return
         job["current_step"] = "3_spec_generation"
         log("Starting combined spec+plan generation")
@@ -1097,15 +1124,26 @@ def run_modification_job(modification_id: str, parent_id: str, change: str, lock
     try:
         task["status"] = "running"
         task["current_step"] = "modify_file_selection"
-        log("Planning the smallest safe file update.")
-        files, revised_spec = _plan_modification(change, original_spec, original_files, on_model_switch=log)
-        task["current_step"] = "modify_code_generation"
-        task["spec"] = revised_spec
-        log(f"Updating {', '.join(files)}")
-        spec_for_generation = {**revised_spec, "modification_request": change}
+        profile = next((item for item in original_files if item.get("filename") == "profile.json"), None)
         working_files = copy.deepcopy(original_files)
         updated_entries: list[dict[str, str]] = []
-        for filename in files:
+        if profile:
+            # Blueprint apps change by editing profile.json; the runtime adapts.
+            log("Updating the app blueprint.")
+            blueprint = generate_blueprint(change, on_model_switch=log, current=json.loads(profile["content"]))
+            revised_spec = _spec_for_blueprint(blueprint)
+            files = ["profile.json"]
+            updated_entries = [{"filename": "profile.json", "content": json.dumps(blueprint, ensure_ascii=False, indent=2)}]
+            task["spec"] = revised_spec
+            log("Updated profile.json")
+        else:
+            log("Planning the smallest safe file update.")
+            files, revised_spec = _plan_modification(change, original_spec, original_files, on_model_switch=log)
+            task["spec"] = revised_spec
+            log(f"Updating {', '.join(files)}")
+        task["current_step"] = "modify_code_generation"
+        spec_for_generation = {**revised_spec, "modification_request": change}
+        for filename in files if not profile else []:
             payload = generate_file_for_component(
                 spec_for_generation,
                 filename,
@@ -1581,8 +1619,16 @@ def health_data():
         free_bytes = shutil.disk_usage(BACKEND_DIR).free
     except OSError:
         free_bytes = 0
+    try:
+        provider_chain = [
+            {"provider": name, "configured": name == "ollama" or bool(os.getenv(PROVIDER_KEY_NAMES[name], "").strip())}
+            for name in llm_provider_order()
+        ]
+    except RuntimeError:
+        provider_chain = []
     return jsonify({
         "providers": checks,
+        "provider_chain": provider_chain,
         "active_provider": LLM_PROVIDER,
         "active_provider_label": active_provider_label,
         "active_model": model,
@@ -1608,7 +1654,9 @@ if __name__ == "__main__":
             start_generated_app(showcase_dir)
             verification = verify_generated_app(showcase_dir, api_contract=contract_for_showcase(showcase))
             if verification.get("status") != "ok":
-                raise RuntimeError(f"Showcase {showcase['name']} failed verification")
+                # A broken demo replay should not stop live generation from serving.
+                print(f"WARNING: Showcase {showcase['name']} failed verification "
+                      f"({verification.get('status')}): {str(verification.get('error'))[:200]}")
         finally:
             stop_generated_app(showcase_dir)
     # Keep history on disk, but don't relaunch every historical preview at boot.

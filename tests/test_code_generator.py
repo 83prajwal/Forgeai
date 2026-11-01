@@ -317,3 +317,17 @@ def test_routes_codegen_uses_smaller_output_reserve(monkeypatch):
     code_generator.generate_file_for_component({}, "routes.py", "route handlers")
 
     assert observed["max_tokens"] == 3500
+
+
+def test_extract_codegen_payload_repairs_double_escaped_content():
+    import json
+    from agent.code_generator import extract_codegen_payload
+
+    source = 'import sqlite3\n\ndef greet(name):\n    return f"hi {name}\\n"\n'
+    double_escaped = json.dumps({"filename": "models.py", "content": json.dumps(source)[1:-1]})
+    payload = extract_codegen_payload(double_escaped)
+
+    assert payload["content"] == source
+    compile(payload["content"], "models.py", "exec")
+    normal = json.dumps({"filename": "models.py", "content": source})
+    assert extract_codegen_payload(normal)["content"] == source

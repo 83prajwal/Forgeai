@@ -154,18 +154,44 @@ def build_api_contract(spec: dict[str, Any]) -> dict[str, Any]:
             pair = (match.group(1).upper(), "/" + match.group(2).lstrip("/"))
         else:
             pair = ("GET", "/" + raw.lstrip("/"))
+        # Models often write Express (/items/:id) or OpenAPI (/items/{id}) paths;
+        # the contract and generated Flask routes use <int:id> placeholders.
+        pair = (pair[0], re.sub(r"(?<=/):([A-Za-z_]\w*)|(?<=/)\{([A-Za-z_]\w*)\}",
+                                lambda m: f"<int:{m.group(1) or m.group(2)}>", pair[1]))
+        # Query strings (?q=) are request arguments, not part of a Flask route.
+        pair = (pair[0], pair[1].split("?", 1)[0].rstrip("/") or "/")
+        # Form pages such as /workouts/new or /workouts/<id>/edit belong to the
+        # hash router in script.js, not the JSON API contract.
+        if re.search(r"/(new|edit)(/|$)", pair[1]):
+            continue
         if pair not in routes:
             routes.append(pair)
+    def table_for_path(path: str) -> str | None:
+        """Match a route to the entity named by its last static segment (/workouts/<id>/exercises -> exercises)."""
+        segments = [s.lower().replace("-", "_") for s in path.split("/") if s and not s.startswith("<") and s != "api"]
+        # Only the last static segment names the resource; /recipes/search is not the recipes collection.
+        for segment in segments[-1:]:
+            for name in tables:
+                if segment in {name, name + "s", name + "es"} or (segment.endswith("ies") and segment[:-3] + "y" == name) \
+                        or (name.endswith("ies") and name[:-3] + "y" == segment) or name in {segment + "s", segment + "es"}:
+                    return name
+        return None
+
+    def is_collection(path: str, table: str) -> bool:
+        return "<" not in path and table_for_path(path) == table
+
+    def is_detail(path: str, table: str) -> bool:
+        return path.endswith(">") and table_for_path(path) == table
+
     for table in tables:
-        collection = next((path for _method, path in routes if table in path.lower() and "<" not in path), None)
+        collection = next((path for _method, path in routes if is_collection(path, table)), None)
         collection = collection or f"/api/{table}{'' if table.endswith('s') else 's'}"
         if not any(method == "GET" and path == collection for method, path in routes):
             routes.append(("GET", collection))
         if not any(method == "POST" and path == collection for method, path in routes):
             routes.append(("POST", collection))
         detail = next((path for method, path in routes
-                       if method in {"GET", "PUT", "PATCH", "DELETE"}
-                       and table in path.lower() and "<" in path), None)
+                       if method in {"GET", "PUT", "PATCH", "DELETE"} and is_detail(path, table)), None)
         detail = detail or f"{collection}/<int:item_id>"
         for method in ("GET", "PUT", "DELETE"):
             if not any(existing_method == method and existing_path == detail for existing_method, existing_path in routes):
@@ -181,7 +207,7 @@ def build_api_contract(spec: dict[str, Any]) -> dict[str, Any]:
         # Do not let the model turn the page root into a JSON API endpoint.
         if method == "GET" and path == "/":
             continue
-        table = next((name for name in tables if name in path.lower()), None)
+        table = table_for_path(path) or next((name for name in tables if name in path.lower()), None)
         columns = tables[table]["columns"] if table else []
         entity = next((item for item in entities if isinstance(item, dict) and table and re.sub(r"[^a-z0-9]+", "_", str(item.get("name", "")).lower()).strip("_") == table), None)
         request_shape = {
@@ -289,9 +315,35 @@ Return one valid JSON object only, using this structure:
 {{"spec":{{"app_name":"","purpose":"","user_roles":[],"core_features":[],"entities":[{{"name":"","fields":[{{"name":"","type":"","required":false}}]}}],"relationships":[],"auth_required":false,"routes_needed":[],"pages_needed":[],"pages":[{{"name":"","purpose":"","widgets":[]}}],"navigation":[],"dashboard_kpis":[],"database_requirements":[],"validation_requirements":[],"error_handling_requirements":[],"responsive_requirements":[],"assumptions":[],"theme":{{}}}},"steps":[]}}
 
 Rules:
+- app_name must use the user's own words for the app, title-cased (e.g. "build a workout tracker app" -> "Workout Tracker"). Do not rename it to a synonym.
+- Every routes_needed entry is a JSON API route under /api/ (e.g. "GET /api/workouts", "PUT /api/workouts/<int:id>"). Do not list UI pages there.
 - Use concise values. Include purpose, roles, requested features, domain workflow, entities/relationships, pages/navigation, database, validation/errors, and responsive needs.
 - Require authentication only when explicitly requested; otherwise assume a single local user and record it. Do not invent external integrations. Do not include demo records or an API contract.
 - Give at most 3 short implementation steps. Output JSON only, without markdown or prose.'''
+
+
+def _coerce_plan_steps(plan: Any) -> list[str]:
+    """Accept the step shapes models actually return: strings, objects, or one text block."""
+    if isinstance(plan, str):
+        plan = [line for line in plan.splitlines() if line.strip()]
+    if isinstance(plan, dict):
+        plan = list(plan.values())
+    if not isinstance(plan, list):
+        raise ValueError("The specification plan must be a list of strings.")
+    steps: list[str] = []
+    for step in plan:
+        if isinstance(step, dict):
+            # e.g. {"step": 1, "description": "..."} or {"title": "...", "details": "..."}
+            text = next((step[key] for key in ("description", "step", "title", "name", "action", "task", "details")
+                         if isinstance(step.get(key), str) and step[key].strip()), None)
+            if text is None:
+                text = next((value for value in step.values() if isinstance(value, str) and value.strip()), None)
+            step = text
+        if isinstance(step, str) and step.strip():
+            steps.append(re.sub(r"^\s*(?:\d+[.)]|[-*])\s*", "", step).strip())
+    if plan and not steps:
+        raise ValueError("The specification plan must be a list of strings.")
+    return steps
 
 
 def generate_spec_and_plan(user_prompt: str, model_name: str = "openai/gpt-oss-20b", on_model_switch: Any = None) -> tuple[dict[str, Any], list[str]]:
@@ -319,7 +371,7 @@ def generate_spec_and_plan(user_prompt: str, model_name: str = "openai/gpt-oss-2
             )
         try:
             response = generate_with_backoff(request_prompt, preferred_model=model_name, json_mode=True,
-                                             on_model_switch=on_model_switch, max_tokens=1600, step="spec",
+                                             on_model_switch=on_model_switch, max_tokens=3000, step="spec",
                                              cache_context={"stage": "combined_spec_and_plan", "attempt": attempt})
             response_text = getattr(response, "text", None)
             if not response_text:
@@ -357,8 +409,7 @@ def generate_spec_and_plan(user_prompt: str, model_name: str = "openai/gpt-oss-2
 
             if not isinstance(spec, dict):
                 raise ValueError("The specification must be a JSON object.")
-            if plan and (not isinstance(plan, list) or not all(isinstance(step, str) for step in plan)):
-                raise ValueError("The specification plan must be a list of strings.")
+            plan = _coerce_plan_steps(plan) if plan else []
             if not plan:
                 plan = [f"Implement {page.get('name', 'the page')} with its specified purpose and widgets"
                         for page in spec.get("pages", []) if isinstance(page, dict)]

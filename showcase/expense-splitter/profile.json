@@ -1,0 +1,81 @@
+{
+  "id": "expense-splitter",
+  "name": "Student Expense Tracker",
+  "category": "Personal Finance",
+  "prompt": "A student budget and expense tracker for spending, categories and monthly limits",
+  "keywords": [
+    "expense",
+    "expenses",
+    "budget",
+    "spending",
+    "finance",
+    "money"
+  ],
+  "accent": "#4f7df3",
+  "icon": "$",
+  "tone": "Clear and reassuring",
+  "entities": [
+    {
+      "name": "Expenses",
+      "table": "expenses",
+      "icon": "↗",
+      "fields": [
+        {
+          "name": "description",
+          "label": "Expense",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "amount",
+          "label": "Amount ($)",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "category",
+          "label": "Category",
+          "type": "select",
+          "options": [
+            "Food",
+            "Housing",
+            "Transport",
+            "Books",
+            "Personal"
+          ]
+        },
+        {
+          "name": "spent_on",
+          "label": "Date",
+          "type": "date"
+        }
+      ],
+      "seed": []
+    },
+    {
+      "name": "Monthly Budgets",
+      "table": "budgets",
+      "icon": "▤",
+      "fields": [
+        {
+          "name": "category",
+          "label": "Category",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "monthly_limit",
+          "label": "Monthly limit ($)",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "month",
+          "label": "Month",
+          "type": "month"
+        }
+      ],
+      "seed": []
+    }
+  ]
+}

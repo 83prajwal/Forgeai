@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Product workspace</title><link rel="stylesheet" href="style.css"></head>
+<body><div class="app-shell">
+  <aside class="sidebar" id="sidebar"><div class="brand"><span class="brand-icon" id="brand-icon">✦</span><span id="brand-name">Workspace</span></div><p class="nav-label">WORKSPACE</p><nav id="navigation"></nav><div class="side-foot"><span class="avatar">◎</span><span><b id="side-user">Your profile</b><small>Workspace settings</small></span><button id="settings-shortcut" aria-label="Open settings">⚙</button></div></aside>
+  <main class="main-area"><header class="topbar"><button id="menu-toggle" class="menu-toggle" aria-label="Open navigation">☰</button><div><div class="crumb">WORKSPACE <span>/</span> <b id="crumb-page">Dashboard</b></div><h1 id="page-title">Dashboard</h1></div><div class="top-actions"><label class="global-search"><span>⌕</span><input id="global-search" placeholder="Search this workspace" aria-label="Search workspace"><kbd>⌘ K</kbd></label><button id="theme-toggle" class="icon-button" aria-label="Toggle theme">◐</button><span class="avatar top-avatar">AM</span></div></header>
+    <section id="content" class="content" aria-live="polite"></section>
+  </main>
+</div>
+<dialog id="record-dialog"><form id="record-form" method="dialog"><div class="dialog-head"><div><p class="eyebrow" id="dialog-kind">NEW ITEM</p><h2 id="dialog-title">Add item</h2></div><button type="button" class="icon-button" id="dialog-close" aria-label="Close">×</button></div><div id="form-fields" class="form-grid"></div><div class="dialog-actions"><button type="button" class="button secondary" id="dialog-cancel">Cancel</button><button class="button primary" id="save-record">Save changes</button></div></form></dialog>
+<div id="toast" role="status" class="toast"></div><script src="script.js"></script></body></html>

@@ -1,0 +1,1 @@
+{"text": "{\"spec\":{\"app_name\":\"AI Mensuration\",\"entities\":[{\"name\":\"Image\",\"fields\":[{\"name\":\"id\",\"type\":\"string\"},{\"name\":\"url\",\"type\":\"string\"},{\"name\":\"uploaded_at\",\"type\":\"string\"}]}]}}"}

@@ -1,0 +1,47 @@
+You are an expert product and software architect.
+
+Your task is to convert the following plain-English app description into a structured application specification.
+
+User request:
+{user_prompt}
+
+Return ONLY valid JSON with no markdown fences, no code blocks, no explanation, and no extra prose.
+
+The JSON object must be exactly structured like this:
+{
+  "app_name": "string",
+  "entities": [
+    {
+      "name": "string",
+      "fields": [
+        {"name": "string", "type": "string"}
+      ]
+    }
+  ],
+  "relationships": [
+    {"from": "string", "to": "string", "type": "string"}
+  ],
+  "auth_required": true,
+  "routes_needed": ["string"],
+  "pages_needed": ["string"],
+  "pages": [{"name":"string", "purpose":"string", "widgets":["string"]}],
+  "navigation": [{"name":"string", "icon":"string", "path":"string"}],
+  "dashboard_kpis": [{"name":"string", "entity":"string", "calculation":"string"}],
+  "seed_data": {"EntityName":[]},
+  "theme": {"accent_colour":"hex", "icon":"emoji or icon name", "tone":"string"},
+  "api_contract": {"endpoints":[{"method":"GET|POST|PUT|DELETE", "path":"/api/...", "request":{}, "response":{}}]}
+}
+
+Rules:
+- Output valid JSON only.
+- Do not wrap the JSON in ```json or any markdown fence.
+- Do not include comments, notes, or explanation.
+- Use realistic entity names and field names.
+- Infer the app name from the request.
+- If auth is required for any user account, dashboard, or protected feature, set "auth_required" to true; otherwise false.
+- Include all major entities, routes, and pages implied by the application.
+- Keep seed_data empty for every entity. Never invent or prepopulate people, records, transactions, tasks, or other sample content. New apps must start with empty entity tables and show polished empty states. Include pages with purposes/widgets, ordered navigation, dashboard KPIs, theme, and a complete CRUD api_contract endpoint list with method, path, request, and response.
+- Keep field types simple and common: string, number, boolean, date, text, array, object.
+- Ensure the JSON is parseable by Python's json.loads().
+
+Return the JSON only.

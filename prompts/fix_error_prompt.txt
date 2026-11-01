@@ -1,0 +1,22 @@
+Fix the following app file.
+
+Error reported:
+{error_message}
+
+Relevant file: {file_path}
+
+Current file contents:
+{file_content}
+
+Return ONLY valid JSON with the structure:
+{"filename": "string", "content": "string"}
+
+Rules:
+- Do not include markdown fences.
+- Return corrected file contents only.
+- Keep the app stable and consistent with the original spec.
+- Ensure the corrected file is valid Python/HTML/CSS/JS depending on the file type.
+- Return the exact filename shown under Relevant file; do not rename or create a different target file.
+- Preserve the project layout and do not rename unrelated files.
+
+Return the JSON only.

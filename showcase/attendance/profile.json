@@ -1,0 +1,89 @@
+{
+  "id": "attendance",
+  "name": "Student Attendance",
+  "category": "Education",
+  "prompt": "A school attendance workspace for students, classes and daily attendance",
+  "keywords": [
+    "attendance",
+    "student",
+    "students",
+    "class",
+    "classes",
+    "school",
+    "hospital",
+    "appointment",
+    "clinic",
+    "booking"
+  ],
+  "accent": "#ef9b42",
+  "icon": "◉",
+  "tone": "Welcoming and dependable",
+  "entities": [
+    {
+      "name": "Students",
+      "table": "students",
+      "icon": "♙",
+      "fields": [
+        {
+          "name": "full_name",
+          "label": "Student",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "student_id",
+          "label": "Student ID",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "grade",
+          "label": "Grade",
+          "type": "text"
+        },
+        {
+          "name": "homeroom",
+          "label": "Homeroom",
+          "type": "text"
+        }
+      ],
+      "seed": []
+    },
+    {
+      "name": "Attendance Records",
+      "table": "attendance",
+      "icon": "✓",
+      "fields": [
+        {
+          "name": "student",
+          "label": "Student",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "class_name",
+          "label": "Class",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "attended_on",
+          "label": "Date",
+          "type": "date"
+        },
+        {
+          "name": "status",
+          "label": "Status",
+          "type": "select",
+          "options": [
+            "Present",
+            "Late",
+            "Absent",
+            "Excused"
+          ]
+        }
+      ],
+      "seed": []
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "id": "task-tracker",
+  "name": "Task & Project Manager",
+  "category": "Productivity",
+  "prompt": "A project workspace for tasks, milestones, owners, priorities and deadlines",
+  "keywords": [
+    "task",
+    "tasks",
+    "project",
+    "projects",
+    "todo",
+    "planner"
+  ],
+  "accent": "#7567f8",
+  "icon": "✓",
+  "tone": "Focused and organized",
+  "entities": [
+    {
+      "name": "Tasks",
+      "table": "tasks",
+      "icon": "☑",
+      "fields": [
+        {
+          "name": "title",
+          "label": "Task",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "project",
+          "label": "Project",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "status",
+          "label": "Status",
+          "type": "select",
+          "options": [
+            "In progress",
+            "Planned",
+            "Complete"
+          ]
+        },
+        {
+          "name": "priority",
+          "label": "Priority",
+          "type": "select",
+          "options": [
+            "High",
+            "Medium",
+            "Low"
+          ]
+        },
+        {
+          "name": "due_date",
+          "label": "Due date",
+          "type": "date"
+        }
+      ],
+      "seed": []
+    },
+    {
+      "name": "Projects",
+      "table": "projects",
+      "icon": "◫",
+      "fields": [
+        {
+          "name": "name",
+          "label": "Project name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "owner",
+          "label": "Project lead",
+          "type": "text"
+        },
+        {
+          "name": "status",
+          "label": "Status",
+          "type": "select",
+          "options": [
+            "Active",
+            "Planning",
+            "Complete"
+          ]
+        },
+        {
+          "name": "target_date",
+          "label": "Target date",
+          "type": "date"
+        }
+      ],
+      "seed": []
+    }
+  ]
+}

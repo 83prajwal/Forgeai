@@ -1,0 +1,21 @@
+You are a senior full-stack engineer.
+
+Turn the following application specification into an ordered list of build steps.
+
+Spec JSON:
+{spec_json}
+
+Return ONLY valid JSON.
+
+The JSON must be one of these shapes:
+1. {"steps": ["step 1", "step 2", ...]}
+2. ["step 1", "step 2", ...]
+
+Rules:
+- Output JSON only; no markdown fences, no prose, no comments.
+- The list must be ordered in the best implementation sequence.
+- Include steps such as: create project folders, install dependencies, create backend files, define models/data, add routes, create UI pages, run the app.
+- Keep each step concise but actionable.
+- Ensure the result is valid JSON parseable by json.loads().
+
+Return the JSON only.

@@ -1,0 +1,85 @@
+{
+  "id": "fitness-log",
+  "name": "Fitness Tracker",
+  "category": "Health & Fitness",
+  "prompt": "A workout journal for sessions, training plans, goals and progress",
+  "keywords": [
+    "fitness",
+    "workout",
+    "workouts",
+    "gym",
+    "exercise",
+    "training",
+    "habit",
+    "streak"
+  ],
+  "accent": "#19a886",
+  "icon": "✦",
+  "tone": "Energetic and encouraging",
+  "entities": [
+    {
+      "name": "Workouts",
+      "table": "workouts",
+      "icon": "⚡",
+      "fields": [
+        {
+          "name": "activity",
+          "label": "Workout",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "duration_min",
+          "label": "Duration (min)",
+          "type": "number",
+          "required": true
+        },
+        {
+          "name": "intensity",
+          "label": "Intensity",
+          "type": "select",
+          "options": [
+            "Easy",
+            "Moderate",
+            "Hard"
+          ]
+        },
+        {
+          "name": "workout_date",
+          "label": "Date",
+          "type": "date"
+        }
+      ],
+      "seed": []
+    },
+    {
+      "name": "Training Goals",
+      "table": "goals",
+      "icon": "◎",
+      "fields": [
+        {
+          "name": "goal",
+          "label": "Training goal",
+          "type": "text",
+          "required": true
+        },
+        {
+          "name": "target",
+          "label": "Target",
+          "type": "text"
+        },
+        {
+          "name": "progress",
+          "label": "Progress (%)",
+          "type": "number"
+        },
+        {
+          "name": "due_date",
+          "label": "Target date",
+          "type": "date"
+        }
+      ],
+      "seed": []
+    }
+  ]
+}

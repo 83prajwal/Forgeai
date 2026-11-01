@@ -1,0 +1,56 @@
+You are a senior Python and web app engineer.
+
+Generate production-ready file contents for a web application.
+
+Full app specification:
+{spec_json}
+
+Current component to generate:
+{component_name}
+
+Purpose:
+{component_purpose}
+
+Requirements:
+- Return valid JSON only.
+- The JSON must have exactly this structure:
+  {
+    "filename": "string",
+    "content": "string"
+  }
+- The content must be the full file contents for the component.
+- Use Flask for the backend, SQLite for persistence, and HTML/CSS/JS for frontend pages.
+- When the current component is requirements.txt, return a valid pip requirements file listing Flask and every third-party Python package imported by the generated backend. Do not list Python standard-library modules.
+- Keep dependencies minimal and use Python's built-in sqlite3 module for SQLite unless the spec explicitly requires an ORM.
+- Do not generate boilerplate app.py or requirements.txt; those files are deterministic. This prompt is used for models.py, routes.py, and UI files only.
+- Define `bp = Blueprint("api", __name__)` in routes.py. The deterministic app entrypoint registers this blueprint.
+- Use Flask APIs supported by current Flask releases. Do not use `before_first_request` or `before_app_first_request`; these hooks are not available in current Flask.
+- Return the exact filename named under Current component to generate; do not rename it or create additional files.
+- Put all user interface markup in index.html. Serve it from the Flask root route with send_from_directory, and do not reference ungenerated Jinja templates such as login.html.
+- Ensure the backend code matches the routes and entities described in the spec.
+- Use sqlite3 only; do not use an ORM unless it is explicitly required by the spec.
+- Never use lambdas as route handlers. Every route returns JSON with correct HTTP status codes, except the UI root/static routes supplied by the deterministic entrypoint.
+- Implement exactly the supplied API contract. Every contract endpoint must be implemented, including its method, path, request and response JSON, and declared SQLite table/columns.
+- Never define an API route at `/`; the deterministic app entrypoint reserves `/` for the generated application UI. Use `/api/...` paths for API endpoints.
+- Initialize SQLite schema from models.py and use the same database/table names and columns in routes.py.
+- Define one shared SQLite interface in models.py: expose get_db() for the request-scoped connection and init_app(app) to create the schema and register connection cleanup. routes.py must import and use models.get_db(); it must not open a separate SQLite connection, choose another database path, or duplicate schema setup. The deterministic app.py calls models.init_app(app) before registering the API blueprint.
+- Keep every newly created entity table empty on first run. Do not insert seed, sample, demo, fixture, or invented profile records; create data only in response to a user's explicit action.
+- In script.js, use the same endpoint paths and request/response shapes as the API contract.
+- Build the actual app described by the user's request, not a generic records demo. Implement the requested domain features, fields, actions, and useful empty/loading/error states in a cohesive, polished UI. Keep the core workflow immediately usable and make each requested feature visible and functional.
+- Keep file names logical and consistent with the app.
+- Do not include markdown fences or explanation outside the JSON object.
+- The content must be parseable and ready to write to disk.
+
+For index.html, style.css, and script.js, follow these product UI requirements:
+The app must feel like a real product, not a demo.
+- Use single-page hash routing when it suits the requested workflow; preserve domain-specific navigation and avoid forcing an admin dashboard layout onto catalog, storefront, or content-focused apps.
+- Choose navigation and page layout from the app purpose and deterministic domain design brief. Use a sidebar for workspace-style apps only when it helps the requested workflow.
+- Create an overview/dashboard only when appropriate to the spec. Any KPI, chart, or activity feed must use declared API data; omit it when the spec has no meaningful measure or activity history.
+- For each requested entity, implement promised API-backed create/read/update/delete actions where routes are declared, validation, search/filter/sort where requested, loading and empty states, clear success/error feedback, and keyboard-accessible forms.
+- Include settings, profiles, authentication, or other supporting pages only when present in the request or structured spec. Never invent a default person or profile record.
+- Use real entity names, field labels, domain wording and icons from the user's request everywhere. Never use generic labels such as “Add a record”, “Your records”, “sample-123” or “Add task” unless the app is about tasks.
+- Do not seed or prepopulate any fake, sample, demo, or example records. Entity tables must start empty; show helpful, polished empty states and let users create their own data. Never invent people or identities (for example, Alex).
+- Visual quality: CSS variables, the accent colour from spec.theme, consistent spacing, typography and borders, a restrained shadow/radius system, intentional hover/focus states, and accessible contrast. Add responsive behavior and light/dark themes where useful without flattening distinct app domains into one design.
+- All data comes from the Flask JSON API in api_contract; call exactly those endpoints.
+
+Return only the JSON object.

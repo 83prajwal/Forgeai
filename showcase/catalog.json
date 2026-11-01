@@ -1,0 +1,517 @@
+[
+  {
+    "id": "task-tracker",
+    "name": "Task & Project Manager",
+    "category": "Productivity",
+    "prompt": "A project workspace for tasks, milestones, owners, priorities and deadlines",
+    "keywords": [
+      "task",
+      "tasks",
+      "project",
+      "projects",
+      "todo",
+      "planner"
+    ],
+    "accent": "#7567f8",
+    "icon": "✓",
+    "tone": "Focused and organized",
+    "entities": [
+      {
+        "name": "Tasks",
+        "table": "tasks",
+        "icon": "☑",
+        "fields": [
+          {
+            "name": "title",
+            "label": "Task",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "project",
+            "label": "Project",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "status",
+            "label": "Status",
+            "type": "select",
+            "options": [
+              "In progress",
+              "Planned",
+              "Complete"
+            ]
+          },
+          {
+            "name": "priority",
+            "label": "Priority",
+            "type": "select",
+            "options": [
+              "High",
+              "Medium",
+              "Low"
+            ]
+          },
+          {
+            "name": "due_date",
+            "label": "Due date",
+            "type": "date"
+          }
+        ],
+        "seed": []
+      },
+      {
+        "name": "Projects",
+        "table": "projects",
+        "icon": "◫",
+        "fields": [
+          {
+            "name": "name",
+            "label": "Project name",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "owner",
+            "label": "Project lead",
+            "type": "text"
+          },
+          {
+            "name": "status",
+            "label": "Status",
+            "type": "select",
+            "options": [
+              "Active",
+              "Planning",
+              "Complete"
+            ]
+          },
+          {
+            "name": "target_date",
+            "label": "Target date",
+            "type": "date"
+          }
+        ],
+        "seed": []
+      }
+    ]
+  },
+  {
+    "id": "fitness-log",
+    "name": "Fitness Tracker",
+    "category": "Health & Fitness",
+    "prompt": "A workout journal for sessions, training plans, goals and progress",
+    "keywords": [
+      "fitness",
+      "workout",
+      "workouts",
+      "gym",
+      "exercise",
+      "training",
+      "habit",
+      "streak"
+    ],
+    "accent": "#19a886",
+    "icon": "✦",
+    "tone": "Energetic and encouraging",
+    "entities": [
+      {
+        "name": "Workouts",
+        "table": "workouts",
+        "icon": "⚡",
+        "fields": [
+          {
+            "name": "activity",
+            "label": "Workout",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "duration_min",
+            "label": "Duration (min)",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "intensity",
+            "label": "Intensity",
+            "type": "select",
+            "options": [
+              "Easy",
+              "Moderate",
+              "Hard"
+            ]
+          },
+          {
+            "name": "workout_date",
+            "label": "Date",
+            "type": "date"
+          }
+        ],
+        "seed": []
+      },
+      {
+        "name": "Training Goals",
+        "table": "goals",
+        "icon": "◎",
+        "fields": [
+          {
+            "name": "goal",
+            "label": "Training goal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "target",
+            "label": "Target",
+            "type": "text"
+          },
+          {
+            "name": "progress",
+            "label": "Progress (%)",
+            "type": "number"
+          },
+          {
+            "name": "due_date",
+            "label": "Target date",
+            "type": "date"
+          }
+        ],
+        "seed": []
+      }
+    ]
+  },
+  {
+    "id": "expense-splitter",
+    "name": "Student Expense Tracker",
+    "category": "Personal Finance",
+    "prompt": "A student budget and expense tracker for spending, categories and monthly limits",
+    "keywords": [
+      "expense",
+      "expenses",
+      "budget",
+      "spending",
+      "finance",
+      "money"
+    ],
+    "accent": "#4f7df3",
+    "icon": "$",
+    "tone": "Clear and reassuring",
+    "entities": [
+      {
+        "name": "Expenses",
+        "table": "expenses",
+        "icon": "↗",
+        "fields": [
+          {
+            "name": "description",
+            "label": "Expense",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "amount",
+            "label": "Amount ($)",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "category",
+            "label": "Category",
+            "type": "select",
+            "options": [
+              "Food",
+              "Housing",
+              "Transport",
+              "Books",
+              "Personal"
+            ]
+          },
+          {
+            "name": "spent_on",
+            "label": "Date",
+            "type": "date"
+          }
+        ],
+        "seed": []
+      },
+      {
+        "name": "Monthly Budgets",
+        "table": "budgets",
+        "icon": "▤",
+        "fields": [
+          {
+            "name": "category",
+            "label": "Category",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "monthly_limit",
+            "label": "Monthly limit ($)",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "month",
+            "label": "Month",
+            "type": "month"
+          }
+        ],
+        "seed": []
+      }
+    ]
+  },
+  {
+    "id": "attendance",
+    "name": "Student Attendance",
+    "category": "Education",
+    "prompt": "A school attendance workspace for students, classes and daily attendance",
+    "keywords": [
+      "attendance",
+      "student",
+      "students",
+      "class",
+      "classes",
+      "school",
+      "hospital",
+      "appointment",
+      "clinic",
+      "booking"
+    ],
+    "accent": "#ef9b42",
+    "icon": "◉",
+    "tone": "Welcoming and dependable",
+    "entities": [
+      {
+        "name": "Students",
+        "table": "students",
+        "icon": "♙",
+        "fields": [
+          {
+            "name": "full_name",
+            "label": "Student",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "student_id",
+            "label": "Student ID",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "grade",
+            "label": "Grade",
+            "type": "text"
+          },
+          {
+            "name": "homeroom",
+            "label": "Homeroom",
+            "type": "text"
+          }
+        ],
+        "seed": []
+      },
+      {
+        "name": "Attendance Records",
+        "table": "attendance",
+        "icon": "✓",
+        "fields": [
+          {
+            "name": "student",
+            "label": "Student",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "class_name",
+            "label": "Class",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "attended_on",
+            "label": "Date",
+            "type": "date"
+          },
+          {
+            "name": "status",
+            "label": "Status",
+            "type": "select",
+            "options": [
+              "Present",
+              "Late",
+              "Absent",
+              "Excused"
+            ]
+          }
+        ],
+        "seed": []
+      }
+    ]
+  },
+  {
+    "id": "inventory",
+    "name": "Inventory Manager",
+    "category": "Operations",
+    "prompt": "An inventory system for products, suppliers, stock levels and replenishment",
+    "keywords": [
+      "inventory",
+      "stock",
+      "product",
+      "products",
+      "supplier",
+      "bookstore",
+      "store"
+    ],
+    "accent": "#df7658",
+    "icon": "▦",
+    "tone": "Practical and precise",
+    "entities": [
+      {
+        "name": "Products",
+        "table": "products",
+        "icon": "▣",
+        "fields": [
+          {
+            "name": "sku",
+            "label": "SKU",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "name",
+            "label": "Product",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "category",
+            "label": "Category",
+            "type": "text"
+          },
+          {
+            "name": "quantity",
+            "label": "In stock",
+            "type": "number",
+            "required": true
+          },
+          {
+            "name": "unit_price",
+            "label": "Unit price ($)",
+            "type": "number"
+          }
+        ],
+        "seed": []
+      },
+      {
+        "name": "Suppliers",
+        "table": "suppliers",
+        "icon": "♧",
+        "fields": [
+          {
+            "name": "company",
+            "label": "Supplier",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "contact",
+            "label": "Contact",
+            "type": "text"
+          },
+          {
+            "name": "email",
+            "label": "Email",
+            "type": "email"
+          },
+          {
+            "name": "lead_days",
+            "label": "Lead time (days)",
+            "type": "number"
+          }
+        ],
+        "seed": []
+      }
+    ]
+  },
+  {
+    "id": "resume-builder",
+    "name": "Resume Builder",
+    "category": "Career",
+    "prompt": "A career profile workspace for personal details, work experience and skills",
+    "keywords": [
+      "resume",
+      "cv",
+      "career",
+      "experience",
+      "portfolio"
+    ],
+    "accent": "#616fd8",
+    "icon": "↗",
+    "tone": "Confident and polished",
+    "entities": [
+      {
+        "name": "Profile",
+        "table": "profiles",
+        "icon": "♙",
+        "fields": [
+          {
+            "name": "full_name",
+            "label": "Full name",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "headline",
+            "label": "Professional headline",
+            "type": "text"
+          },
+          {
+            "name": "email",
+            "label": "Email",
+            "type": "email"
+          },
+          {
+            "name": "location",
+            "label": "Location",
+            "type": "text"
+          }
+        ],
+        "seed": []
+      },
+      {
+        "name": "Experience",
+        "table": "experiences",
+        "icon": "▤",
+        "fields": [
+          {
+            "name": "role",
+            "label": "Role",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "company",
+            "label": "Company",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "period",
+            "label": "Dates",
+            "type": "text"
+          },
+          {
+            "name": "summary",
+            "label": "Impact and achievements",
+            "type": "text"
+          }
+        ],
+        "seed": []
+      }
+    ]
+  }
+]

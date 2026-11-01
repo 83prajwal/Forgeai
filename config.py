@@ -4,10 +4,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+APP_DIR = Path(__file__).resolve().parent
 
 
 def load_environment() -> None:
-    """Load variables from the project root .env file."""
+    """Load variables from this app's .env file, then the parent project's .env."""
+    load_dotenv(APP_DIR / ".env")
     load_dotenv(BASE_DIR / ".env")
 
 
@@ -32,7 +34,19 @@ GEMINI_MODEL_FIX = os.getenv("GEMINI_MODEL_FIX") or GEMINI_MODEL
 # GROQ_MODEL in .env when the account exposes a different model.
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").strip().lower()
-LLM_FALLBACK_PROVIDER = os.getenv("LLM_FALLBACK_PROVIDER", "gemini").strip().lower()
+# Comma-separated chain tried in order after LLM_PROVIDER, e.g. "mistral,nvidia".
+LLM_FALLBACK_PROVIDER = os.getenv("LLM_FALLBACK_PROVIDER", "mistral,nvidia").strip().lower()
+# Mistral (OpenAI-compatible chat completions API)
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+MISTRAL_MODEL_SPEC = os.getenv("MISTRAL_MODEL_SPEC") or "codestral-latest"
+MISTRAL_MODEL_CODEGEN = os.getenv("MISTRAL_MODEL_CODEGEN") or "codestral-latest"
+MISTRAL_MODEL_FIX = os.getenv("MISTRAL_MODEL_FIX") or MISTRAL_MODEL_CODEGEN
+# NVIDIA NIM hosted API (OpenAI-compatible, build.nvidia.com keys start with nvapi-)
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/")
+NVIDIA_MODEL_SPEC = os.getenv("NVIDIA_MODEL_SPEC") or "mistralai/mistral-large-4-1t-a52b"
+NVIDIA_MODEL_CODEGEN = os.getenv("NVIDIA_MODEL_CODEGEN") or "mistralai/mistral-large-4-1t-a52b"
+NVIDIA_MODEL_FIX = os.getenv("NVIDIA_MODEL_FIX") or NVIDIA_MODEL_CODEGEN
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:1.5b").strip()
 # Conservative local inference settings for machines with limited memory.

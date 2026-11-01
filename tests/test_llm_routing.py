@@ -140,12 +140,11 @@ def test_both_providers_rate_limited_returns_safe_error(monkeypatch):
     assert "test-key" not in str(caught.value)
 
 
-@pytest.mark.parametrize("status", [403])
-def test_invalid_credentials_do_not_switch_provider(monkeypatch, status):
-    _keys(monkeypatch)
+@pytest.mark.parametrize("status", [401, 403])
+def test_invalid_credentials_without_fallback_raise(monkeypatch, status):
+    _keys(monkeypatch, gemini="")
     monkeypatch.setattr(llm_client, "_groq", lambda *args: (_ for _ in ()).throw(
         llm_client.ProviderError("groq", "model", "invalid key", status)))
-    monkeypatch.setattr(llm_client, "_gemini", lambda *args: pytest.fail("permanent error must not switch"))
 
     expected = "Create or rotate the key" if status == 401 else "denied access"
     with pytest.raises(RuntimeError, match=expected):
@@ -164,14 +163,112 @@ def test_groq_unauthorized_falls_back_to_configured_gemini(monkeypatch):
 
 
 @pytest.mark.parametrize("status", [400, 404])
-def test_unsupported_model_does_not_switch_provider(monkeypatch, status):
-    _keys(monkeypatch)
+def test_unsupported_model_without_fallback_raises(monkeypatch, status):
+    _keys(monkeypatch, gemini="")
     monkeypatch.setattr(llm_client, "_groq", lambda *args: (_ for _ in ()).throw(
         llm_client.ProviderError("groq", "model", "unsupported model", status)))
-    monkeypatch.setattr(llm_client, "_gemini", lambda *args: pytest.fail("unsupported model must not switch"))
 
     with pytest.raises(RuntimeError, match="rejected the configured model"):
         llm_client.generate_with_backoff("prompt")
+
+
+def _chain(monkeypatch):
+    monkeypatch.setattr(llm_client, "LLM_FALLBACK_PROVIDER", "mistral,nvidia")
+    monkeypatch.setenv("GROQ_API_KEY", "groq-test-key")
+    monkeypatch.setenv("MISTRAL_API_KEY", "mistral-test-key")
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvidia-test-key")
+    monkeypatch.setattr(llm_client, "_gemini", lambda *_args: pytest.fail("Gemini is not in the chain"))
+
+
+def _fail(provider, status):
+    return lambda *args: (_ for _ in ()).throw(llm_client.ProviderError(provider, "model", "boom", status))
+
+
+def test_chain_order_is_groq_then_mistral_then_nvidia(monkeypatch):
+    monkeypatch.setattr(llm_client, "LLM_FALLBACK_PROVIDER", "mistral,nvidia")
+    assert llm_client._provider_order() == ["groq", "mistral", "nvidia"]
+
+
+def test_groq_success_does_not_call_fallbacks(monkeypatch):
+    _chain(monkeypatch)
+    monkeypatch.setattr(llm_client, "_groq", lambda *args: ('{"from":"groq"}', object()))
+    monkeypatch.setattr(llm_client, "_mistral", lambda *args: pytest.fail("Groq succeeded"))
+    monkeypatch.setattr(llm_client, "_nvidia", lambda *args: pytest.fail("Groq succeeded"))
+
+    assert llm_client.generate_with_backoff("prompt").provider == "groq"
+
+
+@pytest.mark.parametrize("status", [429, 401, 400, 503])
+def test_groq_failure_falls_back_to_mistral(monkeypatch, status):
+    _chain(monkeypatch)
+    monkeypatch.setattr(llm_client, "_groq", _fail("groq", status))
+    calls = []
+    monkeypatch.setattr(llm_client, "_mistral", lambda *args: (calls.append(args[1]) or ('{"from":"mistral"}', object())))
+    monkeypatch.setattr(llm_client, "_nvidia", lambda *args: pytest.fail("Mistral succeeded"))
+
+    response = llm_client.generate_with_backoff("prompt", preferred_model="openai/gpt-oss-120b", json_mode=True)
+
+    assert (response.text, response.provider) == ('{"from":"mistral"}', "mistral")
+    assert calls == [llm_client.MISTRAL_MODEL_CODEGEN]
+
+
+def test_groq_and_mistral_failures_fall_back_to_nvidia(monkeypatch):
+    _chain(monkeypatch)
+    monkeypatch.setattr(llm_client, "_groq", _fail("groq", 429))
+    monkeypatch.setattr(llm_client, "_mistral", _fail("mistral", 401))
+    monkeypatch.setattr(llm_client, "_nvidia", lambda *args: ('{"from":"nvidia"}', object()))
+    switches = []
+
+    response = llm_client.generate_with_backoff("prompt", on_model_switch=switches.append)
+
+    assert response.provider == "nvidia"
+    assert any("falling back to Mistral" in line for line in switches)
+    assert any("falling back to Nvidia" in line for line in switches)
+
+
+def test_all_chain_providers_failing_reports_each(monkeypatch):
+    _chain(monkeypatch)
+    monkeypatch.setattr(llm_client, "_groq", _fail("groq", 429))
+    monkeypatch.setattr(llm_client, "_mistral", _fail("mistral", 429))
+    monkeypatch.setattr(llm_client, "_nvidia", _fail("nvidia", 403))
+
+    with pytest.raises(RuntimeError, match="Groq .*Mistral .*Nvidia") as caught:
+        llm_client.generate_with_backoff("prompt")
+    assert "test-key" not in str(caught.value)
+
+
+def test_missing_mistral_key_skips_to_nvidia(monkeypatch):
+    _chain(monkeypatch)
+    monkeypatch.setenv("MISTRAL_API_KEY", "")
+    monkeypatch.setattr(llm_client, "_groq", _fail("groq", 429))
+    monkeypatch.setattr(llm_client, "_mistral", lambda *args: pytest.fail("Mistral has no key"))
+    monkeypatch.setattr(llm_client, "_nvidia", lambda *args: ('{"ok":true}', object()))
+
+    assert llm_client.generate_with_backoff("prompt").provider == "nvidia"
+
+
+def test_nvidia_request_omits_json_response_format(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvidia-test-key")
+    sent = {}
+
+    class FakeResponse:
+        status_code = 200
+        headers = {}
+
+        def json(self):
+            return {"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}]}
+
+    def post(url, headers, json, timeout):
+        sent.update(url=url, body=json, auth=headers["Authorization"])
+        return FakeResponse()
+
+    monkeypatch.setattr(llm_client.requests, "post", post)
+    text, _raw = llm_client._nvidia("prompt", "meta/llama-3.3-70b-instruct", 100, True)
+
+    assert text == "{}"
+    assert sent["url"].endswith("/chat/completions") and "nvidia.com" in sent["url"]
+    assert "response_format" not in sent["body"]
+    assert sent["auth"] == "Bearer nvidia-test-key"
 
 
 def test_missing_keys_is_clear_and_no_clients_called(monkeypatch):
@@ -413,7 +510,7 @@ def test_missing_gemini_key_reports_fallback_unavailable(monkeypatch):
         llm_client.ProviderError("groq", "model", "daily quota exhausted", 429)))
     monkeypatch.setattr(llm_client, "_gemini", lambda *args: pytest.fail("Gemini key absent"))
 
-    with pytest.raises(RuntimeError, match="Groq quota exhausted.*GEMINI_API_KEY is not configured"):
+    with pytest.raises(RuntimeError, match="Groq quota exhausted.*set GEMINI_API_KEY in .env"):
         llm_client.generate_with_backoff("prompt")
 
 

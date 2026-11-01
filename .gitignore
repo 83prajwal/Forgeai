@@ -7,3 +7,9 @@ showcase/*/port.txt
 showcase/*/*.log
 __pycache__/
 *.py[cod]
+.env
+,env
+venv/
+/tests
+/showcase
+C:\Users\Admin\Desktop\Projects\forge_ai\Forgeai\showcase

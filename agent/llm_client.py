@@ -19,14 +19,19 @@ from config import (
     GROQ_MODEL_CODEGEN, GROQ_MODEL_FIX, GROQ_MODEL_SPEC, GROQ_TOKENS_PER_MINUTE,
     GROQ_TPM_70B, GROQ_TPM_8B, GROQ_LOCAL_REQUESTS_PER_MINUTE, GROQ_MAX_RETRIES,
     LLM_PROVIDER, LLM_FALLBACK_PROVIDER, LLM_CACHE_ENABLED,
+    MISTRAL_MODEL_CODEGEN, MISTRAL_MODEL_FIX, MISTRAL_MODEL_SPEC,
+    NVIDIA_BASE_URL, NVIDIA_MODEL_CODEGEN, NVIDIA_MODEL_FIX, NVIDIA_MODEL_SPEC,
     OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_NUM_CTX, OLLAMA_MAX_OUTPUT_TOKENS,
     OLLAMA_REQUEST_TIMEOUT_SECONDS,
 )
 from config import get_groq_api_key
 
 logger = logging.getLogger("forgeai.llm")
+SUPPORTED_PROVIDERS = ("groq", "mistral", "nvidia", "gemini", "ollama")
+PROVIDER_KEY_NAMES = {"groq": "GROQ_API_KEY", "mistral": "MISTRAL_API_KEY",
+                      "nvidia": "NVIDIA_API_KEY", "gemini": "GEMINI_API_KEY"}
 _call_lock = threading.RLock()
-_usage: dict[str, deque[tuple[float, int]]] = {"groq": deque(), "gemini": deque(), "ollama": deque()}
+_usage: dict[str, deque[tuple[float, int]]] = {provider: deque() for provider in SUPPORTED_PROVIDERS}
 _request_usage: dict[str, deque[float]] = {"groq": deque()}
 _cooldown: dict[str, float] = {}
 _call_stats: list[dict[str, Any]] = []
@@ -91,7 +96,7 @@ _LOG_SECRET_PATTERNS = (
     re.compile(r"(?i)(https?://)[^/@\s]+:[^/@\s]+@"),
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"),
     re.compile(r"(?i)(\b(?:api[_-]?key|access[_-]?token|auth(?:orization)?|secret|password)\b\s*[:=]\s*[\"']?)[^\s,;\"'}]+"),
-    re.compile(r"\b(?:sk-[A-Za-z0-9_-]{12,}|gsk_[A-Za-z0-9_-]{12,}|AIza[A-Za-z0-9_-]{20,})\b"),
+    re.compile(r"\b(?:sk-[A-Za-z0-9_-]{12,}|gsk_[A-Za-z0-9_-]{12,}|nvapi-[A-Za-z0-9_-]{12,}|AIza[A-Za-z0-9_-]{20,})\b"),
     re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE),
 )
 
@@ -100,7 +105,7 @@ def _safe_error_detail(value: Any, limit: int = 240) -> str | None:
     if value is None:
         return None
     detail = " ".join(str(value).split())
-    for variable in ("GROQ_API_KEY", "GEMINI_API_KEY"):
+    for variable in PROVIDER_KEY_NAMES.values():
         secret = os.getenv(variable, "").strip()
         if len(secret) >= 8:
             detail = detail.replace(secret, "[REDACTED]")
@@ -144,25 +149,37 @@ def _provider_model(provider: str, step: str, preferred_model: str | None) -> st
         return OLLAMA_MODEL
     if provider == "gemini":
         return {"spec": GEMINI_MODEL_SPEC, "planner": GEMINI_MODEL_SPEC, "fix": GEMINI_MODEL_FIX}.get(step, GEMINI_MODEL_CODEGEN)
+    if provider == "mistral":
+        return {"spec": MISTRAL_MODEL_SPEC, "planner": MISTRAL_MODEL_SPEC, "fix": MISTRAL_MODEL_FIX}.get(step, MISTRAL_MODEL_CODEGEN)
+    if provider == "nvidia":
+        return {"spec": NVIDIA_MODEL_SPEC, "planner": NVIDIA_MODEL_SPEC, "fix": NVIDIA_MODEL_FIX}.get(step, NVIDIA_MODEL_CODEGEN)
     if preferred_model and not preferred_model.lower().startswith("gemini-"):
         return preferred_model
     return {"spec": GROQ_MODEL_SPEC, "planner": GROQ_MODEL_SPEC, "fix": GROQ_MODEL_FIX}.get(step, GROQ_MODEL_CODEGEN)
 
 
 def _provider_order() -> list[str]:
-    """Resolve configured provider order while allowing a deliberate no-fallback setting."""
-    supported = {"groq", "gemini", "ollama"}
+    """Resolve the primary provider plus a comma-separated fallback chain."""
+    hosted = set(SUPPORTED_PROVIDERS) - {"ollama"}
     primary = LLM_PROVIDER
-    fallback = LLM_FALLBACK_PROVIDER
+    fallbacks = [name.strip() for name in LLM_FALLBACK_PROVIDER.split(",") if name.strip()]
     # Ollama is intentionally isolated: a local-only selection can never fall
     # through to a hosted provider, even if an older .env still names Gemini.
     if primary == "ollama":
         return ["ollama"]
-    if primary not in supported:
-        raise RuntimeError("LLM_PROVIDER must be 'groq', 'gemini', or 'ollama'.")
-    if fallback and fallback not in supported:
-        raise RuntimeError("LLM_FALLBACK_PROVIDER must be 'groq', 'gemini', or empty to disable fallback.")
-    return [primary] + ([fallback] if fallback and fallback != primary else [])
+    if primary not in hosted:
+        raise RuntimeError("LLM_PROVIDER must be 'groq', 'mistral', 'nvidia', 'gemini', or 'ollama'.")
+    invalid = [name for name in fallbacks if name not in hosted]
+    if invalid:
+        raise RuntimeError(
+            "LLM_FALLBACK_PROVIDER must be a comma-separated list of 'groq', 'mistral', 'nvidia', 'gemini', "
+            "or empty to disable fallback."
+        )
+    order = [primary]
+    for name in fallbacks:
+        if name not in order:
+            order.append(name)
+    return order
 
 
 def _provider_output_limit(provider: str, requested: int) -> int:
@@ -284,42 +301,63 @@ def _log_failure(provider: str, model: str, prompt: str, max_tokens: int, exc: E
     )
 
 
-def _groq(prompt: str, model: str, max_tokens: int, json_mode: bool) -> tuple[str, Any]:
-    key = os.getenv("GROQ_API_KEY", "").strip()
+def _openai_compatible(provider: str, label: str, url: str, prompt: str, model: str, max_tokens: int,
+                       json_mode: bool, *, native_json: bool = True) -> tuple[str, Any]:
+    """Call an OpenAI-compatible chat completions endpoint (Groq, Mistral, NVIDIA)."""
+    key_name = PROVIDER_KEY_NAMES[provider]
+    key = os.getenv(key_name, "").strip()
     if not key:
-        raise ProviderError("groq", model, "GROQ_API_KEY is missing or empty.")
+        raise ProviderError(provider, model, f"{key_name} is missing or empty.")
     body: dict[str, Any] = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens}
-    if json_mode:
+    if json_mode and native_json:
         body["response_format"] = {"type": "json_object"}
-    response = requests.post("https://api.groq.com/openai/v1/chat/completions",
-                             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, json=body,
-                             timeout=float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "90")))
+    response = requests.post(url, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                             json=body, timeout=float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "90")))
     if response.status_code >= 400:
         error_type = error_code = None
         try:
             payload = response.json()
             error = payload.get("error", {}) if isinstance(payload, dict) else {}
             if isinstance(error, dict):
-                message = error.get("message") or f"Groq returned HTTP {response.status_code}."
+                message = error.get("message") or f"{label} returned HTTP {response.status_code}."
                 error_type, error_code = error.get("type"), error.get("code")
+            elif isinstance(payload, dict) and isinstance(payload.get("message") or payload.get("detail"), str):
+                message = payload.get("message") or payload.get("detail")
             else:
-                message = f"Groq returned HTTP {response.status_code}."
+                message = f"{label} returned HTTP {response.status_code}."
         except ValueError:
-            message = f"Groq returned HTTP {response.status_code} with a non-JSON error body."
+            message = f"{label} returned HTTP {response.status_code} with a non-JSON error body."
         retry = _retry_seconds(response.headers, str(message))
-        raise ProviderError("groq", model, str(message), response.status_code, retry, response.headers,
+        raise ProviderError(provider, model, str(message), response.status_code, retry, response.headers,
                             error_type=error_type, error_code=error_code)
     try:
         payload = response.json()
     except ValueError as exc:
-        raise ProviderError("groq", model, "Groq returned a malformed JSON response envelope (HTTP 200).", 200) from exc
+        raise ProviderError(provider, model, f"{label} returned a malformed JSON response envelope (HTTP 200).", 200) from exc
     try:
         content = payload["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise ProviderError("groq", model, "Groq returned an incomplete response envelope (HTTP 200).", 200) from exc
+        raise ProviderError(provider, model, f"{label} returned an incomplete response envelope (HTTP 200).", 200) from exc
     if not isinstance(content, str):
-        raise ProviderError("groq", model, "Groq returned a non-text response envelope (HTTP 200).", 200)
+        raise ProviderError(provider, model, f"{label} returned a non-text response envelope (HTTP 200).", 200)
     return content, response
+
+
+def _groq(prompt: str, model: str, max_tokens: int, json_mode: bool) -> tuple[str, Any]:
+    return _openai_compatible("groq", "Groq", "https://api.groq.com/openai/v1/chat/completions",
+                              prompt, model, max_tokens, json_mode)
+
+
+def _mistral(prompt: str, model: str, max_tokens: int, json_mode: bool) -> tuple[str, Any]:
+    return _openai_compatible("mistral", "Mistral", "https://api.mistral.ai/v1/chat/completions",
+                              prompt, model, max_tokens, json_mode)
+
+
+def _nvidia(prompt: str, model: str, max_tokens: int, json_mode: bool) -> tuple[str, Any]:
+    # JSON-object mode is not supported by every NIM model; the prompts already
+    # demand raw JSON and callers validate the payload.
+    return _openai_compatible("nvidia", "NVIDIA", f"{NVIDIA_BASE_URL}/chat/completions",
+                              prompt, model, max_tokens, json_mode, native_json=False)
 
 
 def _gemini(prompt: str, model: str, max_tokens: int, json_mode: bool) -> tuple[str, Any]:
@@ -431,9 +469,10 @@ def _safe_failure(exc: Exception, provider: str) -> str:
             "Groq rejected GROQ_API_KEY (HTTP 401). Create or rotate the key in the Groq Console, "
             "replace GROQ_API_KEY in the project-root .env file, then restart ForgeAI."
         )
-    if status == 401 and provider == "gemini":
+    if status == 401 and provider in {"gemini", "mistral", "nvidia"}:
+        label = {"gemini": "Gemini", "mistral": "Mistral", "nvidia": "NVIDIA"}[provider]
         return (
-            "Gemini rejected GEMINI_API_KEY (HTTP 401). Check or replace the key in the project-root .env file, "
+            f"{label} rejected {PROVIDER_KEY_NAMES[provider]} (HTTP 401). Check or replace the key in the .env file, "
             "then restart ForgeAI."
         )
     if status == 403 and provider == "groq":
@@ -509,10 +548,10 @@ def generate_with_backoff(
     step: str = "codegen",
     cache_context: Any = None,
 ) -> LLMResponse:
-    """Call Groq first and fall back to Gemini for quota/temporary failures."""
-    key_names = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY"}
+    """Call the primary provider (Groq) and walk the fallback chain (Mistral, then NVIDIA) on failure."""
     providers = _provider_order()
-    configured = [provider for provider in providers if provider == "ollama" or os.getenv(key_names[provider], "").strip()]
+    configured = [provider for provider in providers
+                  if provider == "ollama" or os.getenv(PROVIDER_KEY_NAMES[provider], "").strip()]
     errors: list[str] = []
     max_retries = min(3, max(0, int(max_retries)), max(0, int(GROQ_MAX_RETRIES)))
     attempts_left = max_retries
@@ -532,17 +571,18 @@ def generate_with_backoff(
                 logger.info("LLM cache hit provider=%s model=%s prompt_chars=%d", provider, model, len(prompt))
                 with _stats_lock:
                     _call_metrics["cache_hits"] += 1
-                    if provider == "gemini" and "groq" in configured:
+                    if configured and provider != configured[0]:
                         _call_metrics["fallback_activations"] += 1
                     _call_stats.append({"provider": provider, "model": model, "estimated_tokens": 0,
                                         "wait_seconds": 0, "cached": True})
                 return LLMResponse(cached, provider, model)
 
-        for provider in providers:
+        for index, provider in enumerate(providers):
             model = models[provider]
             provider_max_tokens = _provider_output_limit(provider, max_tokens)
             if provider not in configured:
                 continue
+            next_provider = next((name for name in providers[index + 1:] if name in configured), None)
             cooldown_until = _cooldown.get(provider, 0.0)
             if cooldown_until > time.monotonic():
                 errors.append(f"{provider.title()} is cooling down; skipping another request.")
@@ -569,7 +609,8 @@ def generate_with_backoff(
             if on_model_switch:
                 on_model_switch(f"Using {provider.title()} {model}")
 
-            provider_call = {"groq": _groq, "gemini": _gemini, "ollama": _ollama}[provider]
+            provider_call = {"groq": _groq, "mistral": _mistral, "nvidia": _nvidia,
+                             "gemini": _gemini, "ollama": _ollama}[provider]
             json_retry_used = False
             while True:
                 started = time.monotonic()
@@ -641,19 +682,18 @@ def generate_with_backoff(
                             exc = retry_exc
                             status = _status(exc)
 
-                    # A provider-specific request/model rejection should not
-                    # prevent a configured secondary provider from serving the
-                    # request. Authentication and billing failures remain
-                    # visible, except that a rejected Groq key may use Gemini.
+                    # Request, model, key, and billing rejections are not
+                    # retried on the same provider, but the next configured
+                    # provider in the chain gets a chance to serve the request.
                     if status in {400, 401, 402, 403, 404}:
-                        retryable_groq_json_failure = status == 400 and json_retry_used
-                        rejected_groq_key = status == 401
-                        if provider == "groq" and (retryable_groq_json_failure or rejected_groq_key) and "gemini" in configured:
-                            errors.append(_safe_failure(exc, provider))
+                        errors.append(_safe_failure(exc, provider))
+                        if next_provider:
+                            if on_model_switch:
+                                on_model_switch(f"{provider.title()} failed (HTTP {status}); falling back to {next_provider.title()}")
                             break
                         with _stats_lock:
                             _call_metrics["generation_failures"] += 1
-                        raise RuntimeError(_safe_failure(exc, provider)) from exc
+                        raise RuntimeError(" ".join(errors)) from exc
 
                     if status == 429:
                         quota = _quota_exhausted(exc)
@@ -664,8 +704,12 @@ def generate_with_backoff(
                             continue
                         reason = "quota exhausted" if quota else "rate limit"
                         errors.append(f"{provider.title()} {reason} (HTTP 429).")
-                        if provider == "groq" and not os.getenv("GEMINI_API_KEY", "").strip():
-                            errors.append("Gemini fallback is unavailable because GEMINI_API_KEY is not configured.")
+                        if not next_provider:
+                            missing = [PROVIDER_KEY_NAMES[name] for name in providers[index + 1:] if name not in configured]
+                            if missing:
+                                errors.append(f"No fallback provider available; set {', '.join(missing)} in .env.")
+                        elif on_model_switch:
+                            on_model_switch(f"{provider.title()} {reason}; falling back to {next_provider.title()}")
                         cooldown_seconds = retry_after if retry_after is not None else (3600.0 if quota else 5.0)
                         _cooldown[provider] = time.monotonic() + max(1.0, cooldown_seconds)
                         break
@@ -686,6 +730,8 @@ def generate_with_backoff(
                         time.sleep(min(max_delay, base_delay * (2 ** (max_retries - attempts_left - 1))))
                         continue
                     errors.append(_safe_failure(exc, provider))
+                    if next_provider and on_model_switch:
+                        on_model_switch(f"{provider.title()} failed; falling back to {next_provider.title()}")
                     break
 
         if not configured:
